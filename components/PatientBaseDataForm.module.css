@@ -1,0 +1,44 @@
+.formWrap {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.fields {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.label {
+  font-weight: 600;
+  font-size: 15px;
+  color: #243b36;
+}
+
+.controlRow {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+/* Eingabefeld nimmt den Platz ein, der Status steht rechts daneben.
+   Auf schmalen Bildschirmen bricht der Status unter das Feld um. */
+.control {
+  flex: 1 1 260px;
+  min-width: 0;
+}
+
+.weiterButton {
+  margin-top: 4px;
+  height: 52px;
+  font-size: 18px;
+  font-weight: 600;
+}
