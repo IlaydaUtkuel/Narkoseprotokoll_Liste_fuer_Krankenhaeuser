@@ -1,0 +1,72 @@
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { loadCase, parseCase, saveCase } from "@/lib/timeline/casePersistence";
+import { CASE_ID, CASE_SCHEMA_VERSION, CASE_STORAGE_KEY } from "@/lib/timeline/config";
+import type { PersistedCase } from "@/types/vitals";
+
+const START = new Date(2026, 6, 31, 19, 0, 0).getTime();
+
+const sample: PersistedCase = {
+  schemaVersion: CASE_SCHEMA_VERSION,
+  caseId: CASE_ID,
+  startedAt: START,
+  measurements: [
+    { id: "a", kind: "spo2", time: START + 60000, value: 95, createdAt: START, updatedAt: START },
+    {
+      id: "b",
+      kind: "nibp",
+      time: START + 120000,
+      systolic: 120,
+      mean: 90,
+      diastolic: 70,
+      createdAt: START,
+      updatedAt: START,
+    },
+  ],
+  lastSavedAt: START + 130000,
+};
+
+describe("casePersistence", () => {
+  beforeEach(() => window.localStorage.clear());
+  afterEach(() => window.localStorage.clear());
+
+  it("speichert und laedt einen Fall verlustfrei", () => {
+    saveCase(sample);
+    const result = loadCase();
+    expect(result.status).toBe("ok");
+    if (result.status === "ok") {
+      expect(result.data.startedAt).toBe(START);
+      expect(result.data.measurements).toHaveLength(2);
+      expect(result.data).toEqual(sample);
+    }
+  });
+
+  it("meldet 'empty', wenn nichts gespeichert ist", () => {
+    expect(loadCase().status).toBe("empty");
+  });
+
+  it("stuerzt bei beschaedigtem JSON nicht ab, sondern meldet 'corrupt'", () => {
+    window.localStorage.setItem(CASE_STORAGE_KEY, "{ kaputt");
+    expect(() => loadCase()).not.toThrow();
+    expect(loadCase().status).toBe("corrupt");
+  });
+
+  it("lehnt eine fremde schemaVersion ab (corrupt, kein stiller Verlust)", () => {
+    window.localStorage.setItem(
+      CASE_STORAGE_KEY,
+      JSON.stringify({ ...sample, schemaVersion: 999 }),
+    );
+    expect(loadCase().status).toBe("corrupt");
+  });
+
+  it("parseCase lehnt unvollstaendige Messungen ab", () => {
+    expect(
+      parseCase({ schemaVersion: CASE_SCHEMA_VERSION, measurements: [{ id: "x", kind: "spo2", time: START }] }),
+    ).toBeNull();
+    expect(
+      parseCase({
+        schemaVersion: CASE_SCHEMA_VERSION,
+        measurements: [{ id: "x", kind: "nibp", time: START, systolic: 120 }],
+      }),
+    ).toBeNull();
+  });
+});

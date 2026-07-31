@@ -1,10 +1,13 @@
 # Narkoseprotokoll Demo – Basisdaten des Narkosefalls
 
-Kleine, aber vollständig funktionierende Webanwendung zur Erfassung der
-**Basisdaten eines fiktiven Narkosefalls**. Diese erste Entwicklungsstufe
-umfasst ausschließlich das Basisdaten-Formular mit automatischem lokalem
-Speichern und Offline-Fähigkeit. Es gibt noch **keine** Vitalwertkurve,
-Medikamente, Infusionen oder Ereignisse.
+Webanwendung zur Dokumentation eines **fiktiven Narkosefalls**. Der Ablauf ist
+zweistufig:
+
+1. **`/` – Basisdaten des Narkosefalls**: Formular mit acht Feldern, feldweisem
+   Autosave, Datumsvalidierung und Offline-Fähigkeit.
+2. **`/dokumentation` – Vitalparameter-Zeitgrafik** (nach „Okay und Weiter“): eine
+   gemeinsame SVG-Zeitgrafik mit vier Baendern (SpO₂, Herzfrequenz, NiBP,
+   Temperatur), Start-/Jetzt-Logik und Eingabe per Maus, Finger und Apple Pencil.
 
 > ⚠️ **Nur fiktive Demodaten.** Es dürfen niemals echte Patientendaten
 > eingegeben oder gespeichert werden.
@@ -28,10 +31,13 @@ professionellen Formular, das
 - **Ant Design 6** als zentrale UI-Bibliothek (deutsche Lokalisierung, ruhiges
   medizinisches Theme, grüner Erfolgsstatus)
 - **dayjs** für die Datumsfelder
-- **`localStorage`** für die acht kleinen Formulardaten (kein Backend, keine Datenbank)
+- **d3-scale** – Zeit↔X- und Wert↔Y-Umrechnung (`scaleTime`, `scaleLinear`)
+- **d3-shape** – SpO₂-Step-Linie/-Flaeche und Linienpfade (`curveStepAfter`, `line`, `area`)
+- **Zustand** – Fall-State (Startzeit, Messungen, Speicherstatus) mit localStorage-Persistenz
+- **`localStorage`** für Basisdaten und Vitaldaten (kein Backend, keine Datenbank)
 - **Serwist** (`@serwist/next`) für Service Worker / PWA
-- **Vitest** + **Testing Library** (Unit-Tests)
-- **Playwright** (End-to-End-Tests, Chromium)
+- **Vitest** + **Testing Library** (Unit-/Komponententests)
+- **Playwright** (End-to-End-Tests, Chromium + iPad-naher Viewport)
 - **npm** als Paketmanager
 
 ## Voraussetzungen
@@ -75,13 +81,22 @@ npm run start
 
 ```bash
 npm run lint        # ESLint
-npm run test        # Unit-Tests (Vitest)
+npm run test        # Unit-/Komponententests (Vitest)
 npm run build       # Produktions-Build (inkl. TypeScript-Prüfung + Service Worker)
-npm run test:e2e    # End-to-End-Tests (Playwright, Chromium)
+npm run test:e2e    # End-to-End-Tests (Playwright)
 ```
 
 Für `npm run test:e2e` muss zuvor `npm run build` gelaufen sein – Playwright
-startet den Produktionsserver (Port 3100) mit `npm run start`.
+startet den Produktionsserver (Port 3100) mit `npm run start`. Es gibt zwei
+Projekte: `chromium` (Desktop) und `ipad-viewport` (iPad-naher Viewport 810×1080
+mit Touch). Für WebKit zusaetzlich `npx playwright install webkit`.
+
+**Videos** werden für **alle** Tests erzeugt (auch erfolgreiche Haupt-Flows,
+`video: "on"`) und liegen unter:
+
+```text
+test-results/<test-ordner>/video.webm
+```
 
 ## Erklärung des Autosaves
 
@@ -135,6 +150,90 @@ einem Server und nicht auf anderen Geräten.
   sobald wieder eine Verbindung besteht.
 - Eine Serversynchronisation gibt es in dieser Stufe bewusst nicht.
 
+## Vitalparameter-Zeitgrafik (`/dokumentation`)
+
+### Warum ein einziges SVG?
+
+Die vier Baender (SpO₂, Herzfrequenz, NiBP, Temperatur) sind **kein** Verbund aus
+vier unabhaengigen Charts, sondern **ein gemeinsames SVG**. Nur so teilen sich
+alle Baender exakt dieselbe X-Achse: derselbe Zeitpunkt liegt in allen vier
+Baendern an derselben senkrechten Position, und der Jetzt-Indikator ist **eine
+einzige** vertikale Linie durch alle Baender. Es wird keine High-Level-Chart-
+Bibliothek (Recharts/Chart.js/ECharts) und kein Canvas verwendet.
+
+### d3-scale / d3-shape
+
+- **d3-scale** (`lib/timeline/scales.ts`): `scaleTime` rechnet echte Zeit ↔ X-Pixel
+  (`timeToX`/`xToTime`), je ein `scaleLinear` pro Band rechnet Wert ↔ Y-Pixel und
+  – per `invert` – Pointer-Y ↔ echter Messwert.
+- **d3-shape** (`lib/timeline/spo2Path.ts`, `components/vitals/LineBand.tsx`):
+  SpO₂ nutzt `curveStepAfter` für Step-Linie und `area` für die wasserartige
+  Flaeche; Herzfrequenz/Temperatur nutzen `line`.
+
+React rendert alle SVG-Elemente; D3 manipuliert das DOM **nicht** direkt.
+
+### Pointer → Zeit und Wert
+
+`lib/timeline/pointerMapping.ts` wandelt eine Pointer-Position um:
+`getBoundingClientRect()` → SVG-Koordinaten → Band-Erkennung über Y →
+`scaleTime.invert` (Zeit) und `scaleLinear.invert` (Wert), gerundet gemaess
+Parameter-Precision. Zukunft und Bereich vor dem Start werden als **Fehler**
+gemeldet (keine stille Clamp). Nahe der Jetzt-Linie wird auf „jetzt“ geschnappt.
+
+Eine gemeinsame Pointer-Logik (`hooks/useTimelinePointer.ts`) behandelt Maus,
+Finger und Stift über `pointerdown/move/up/cancel` + `setPointerCapture`
+(`pointerType` wird ausgewertet). Kurze Bewegung = Tap; groessere Bewegung auf
+dem Plot = Seiten-Scroll (`touch-action: pan-y`), auf einem Punkt = Ziehen
+(`touch-action: none`). Waehrend des Ziehens gibt es nur eine Live-Preview;
+gespeichert wird **einmalig** beim Loslassen.
+
+### Start-/Jetzt-Logik und wachsende Zeitachse
+
+- Der Start-Button zeigt vor dem Start die laufende Uhr `HH:mm:ss`; beim Klick wird
+  `Date.now()` als Startzeit gespeichert und aendert sich danach nie mehr.
+- `domainStart` bleibt fix auf der Startzeit (immer links sichtbar), `domainEnd`
+  waechst mit `now + 30 min`, wodurch die 5-Minuten-Spalten mit der Zeit schmaler
+  werden. Es gibt **kein** horizontales Scrollen.
+- Die 5-Minuten-Ticks sind **relativ zur Startzeit** (Start 19:03 → 19:03, 19:08 …),
+  nicht an der Wanduhr ausgerichtet.
+- „Jetzt“ wird immer aus `Date.now()` berechnet (auch nach `visibilitychange`),
+  nie hochgezaehlt. Der Jetzt-Indikator aktualisiert isoliert (~250 ms), ohne die
+  ganze Seite mit 60 fps neu zu rendern.
+
+### SpO₂-Step-Area
+
+Der zuletzt gemessene SpO₂-Wert wird als Stufe **bis zur Jetzt-Linie** gehalten
+(nie in die Zukunft), ohne kuenstliche Schwankungen. Neue Werte erzeugen eine
+neue Stufe (`curveStepAfter`).
+
+### Farben (zentrale Tokens)
+
+Semantische Farben als CSS-Variablen in `app/globals.css`:
+`--vital-spo2` (blau), `--vital-heart-rate` (rot), `--vital-nibp` (grau),
+`--vital-temperature` (orange), `--timeline-now*` (grün). Farbe ist nie die
+einzige Information – jedes Band hat Name, Einheit, eigene Form und `aria-label`.
+
+### State & Persistenz (Zustand + localStorage)
+
+`store/anesthesiaCaseStore.ts` haelt Startzeit, Messungen, Speicherstatus und
+persistiert **sofort** nach jeder abgeschlossenen Aktion unter dem versionierten
+Schlüssel `sikant-anesthesia-demo-case:v1` (`schemaVersion`). Gespeichert werden
+nur echte Zeit-/Messwerte (`{ time, value }`), **niemals Pixelkoordinaten** –
+bei Groessenaenderung werden alle Positionen neu berechnet (`ResizeObserver`).
+
+**Recovery nach Reload:** Startzeit, alle Messungen und die SpO₂-Flaeche werden
+wiederhergestellt, der Jetzt-Indikator springt auf die echte aktuelle Zeit.
+Beschaedigte Daten fuehren nicht zum Absturz: es erscheint
+„Gespeicherte Falldaten konnten nicht geladen werden.“ mit der Option
+**„Demofall zurücksetzen“** – beschaedigte Daten werden **nicht** still ueberschrieben.
+
+### iPad & Desktop / Apple Pencil
+
+Bedienbar mit Maus (Desktop), Finger und Apple Pencil (iPad). Ein echter Apple
+Pencil laesst sich nicht automatisiert testen; die Pointer-Events-Logik ist aber
+fuer `mouse`, `touch` und `pen` gemeinsam implementiert und wird per Playwright
+(Maus + iPad-Viewport) geprueft.
+
 ## Wichtige Hinweise zur Speicherung
 
 - Die Speicherung gilt **nur** für **denselben Browser, dasselbe Gerät und
@@ -186,14 +285,23 @@ Nach erfolgreichem Deployment die ausgegebene HTTPS-URL oben unter
   keine Geräte-Synchronisation, kein Mehrbenutzerbetrieb.
 - Der Service Worker ist **nur im Produktions-Build** aktiv (im Dev-Modus
   bewusst deaktiviert).
-- Automatisierte Tests laufen in **Chromium**; Safari/WebKit wird manuell auf dem
-  iPad geprüft.
-- Es gibt in dieser Stufe bewusst noch **keine** Vitalwerte, Medikamente,
-  Infusionen, Ereignisse, Backend, Login o. Ä.
+- **WebKit auf diesem Windows-Host nicht startbar** („Host system is missing
+  dependencies“). Das iPad-Projekt läuft daher lokal auf der **Chromium-Engine**
+  mit iPad-Viewport + Touch. Auf macOS/Linux(-CI) kann stattdessen WebKit
+  verwendet werden (`npx playwright install webkit`, Projekt-`browserName` auf
+  `webkit` bzw. `devices["iPad (gen 7)"]`). Die endgültige Safari-Prüfung erfolgt
+  manuell auf einem realen iPad.
+- Ein echter **Apple Pencil** lässt sich nicht automatisiert testen; die
+  Pointer-Events-Logik ist für `mouse`/`touch`/`pen` gemeinsam implementiert.
+- Der **Zeitpunkt** einer Messung wird im Formular nur angezeigt; skalare Werte
+  lassen sich per Ziehen zeitlich/vertikal verschieben, für NiBP ist die Zeit
+  über den Tap-Zeitpunkt festgelegt (Werte per Formular editierbar).
+- Das Kalender-Popup der Datumsfelder kann sich am unteren Feldrand minimal
+  überlappen (funktional ohne Einschränkung).
 
 ## Nächster geplanter Entwicklungsschritt
 
-**Interaktive Vitalwertkurve mit Pointer Events** (Maus, Finger, Apple Pencil):
-`pointerdown`, `pointermove`, `pointerup`, `pointercancel`. Die aktuelle
-Architektur (getrennte Komponenten, Styles und Event-Handling, keine Abhängigkeit
-von reinen Mouse-Events) ist bereits darauf vorbereitet.
+Naheliegend sind **Medikamentengaben, Infusionen und OP-Phasen/Ereignisse** auf
+derselben gemeinsamen Zeitachse (Marker/Balken im selben SVG), sowie ein
+**PDF-Export** des dokumentierten Verlaufs. Die Architektur (gemeinsame Skalen,
+reine Timeline-Funktionen, getrenntes Pointer-Handling) ist darauf vorbereitet.

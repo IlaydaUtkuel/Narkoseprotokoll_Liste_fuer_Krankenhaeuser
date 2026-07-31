@@ -17,11 +17,27 @@ export default defineConfig({
     baseURL: BASE_URL,
     trace: "on-first-retry",
     actionTimeout: 15_000,
+    // Auch fuer erfolgreiche Haupt-Flows Videos erzeugen (nicht nur bei Fehlern).
+    video: "on",
   },
   projects: [
     {
       name: "chromium",
       use: { browserName: "chromium", viewport: { width: 1280, height: 800 } },
+    },
+    {
+      // iPad-naher Viewport (Hochformat) inkl. Touch. Eigentlich als WebKit-Projekt
+      // gedacht; auf diesem Windows-Host laesst sich WebKit nicht starten
+      // ("Host system is missing dependencies"), daher hier die Chromium-Engine.
+      // Siehe README (Bekannte Einschraenkungen).
+      name: "ipad-viewport",
+      use: {
+        browserName: "chromium",
+        viewport: { width: 810, height: 1080 },
+        deviceScaleFactor: 2,
+        isMobile: false,
+        hasTouch: true,
+      },
     },
   ],
   webServer: {
