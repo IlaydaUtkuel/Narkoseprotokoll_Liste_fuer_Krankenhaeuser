@@ -1,5 +1,49 @@
 /* Ruhiges, medizinisches Erscheinungsbild: heller Hintergrund, klare Abstaende. */
 
+/* Zentrale semantische Farbtokens der Vital-Timeline (Quelle der Wahrheit). */
+:root {
+  --vital-spo2: #1677ff;
+  --vital-spo2-soft: rgba(22, 119, 255, 0.3);
+  --vital-heart-rate: #e23b3b;
+  --vital-nibp: #64748b;
+  --vital-nibp-dark: #475569;
+  --vital-temperature: #f5820f;
+  --timeline-now: #16a34a;
+  --timeline-now-soft: rgba(34, 197, 94, 0.4);
+  --timeline-now-dark: #15803d;
+  --timeline-now-line: #4ade80;
+  --timeline-grid: #e4ebe8;
+  --timeline-axis-text: #5a6a66;
+  --timeline-band-title: #243b36;
+}
+
+/* SVG-Textstile der Timeline (SVG nutzt fill statt color). */
+.timeline-band-title {
+  fill: var(--timeline-band-title);
+  font-size: 13px;
+  font-weight: 700;
+}
+.timeline-band-unit {
+  fill: var(--timeline-axis-text);
+  font-size: 12px;
+  font-weight: 500;
+}
+.timeline-axis-label,
+.timeline-y-label {
+  fill: var(--timeline-axis-text);
+  font-size: 11px;
+}
+.timeline-now-label {
+  fill: var(--timeline-now-dark);
+  font-size: 12px;
+  font-weight: 700;
+}
+.timeline-last-value {
+  fill: var(--timeline-band-title);
+  font-size: 12px;
+  font-weight: 600;
+}
+
 * {
   box-sizing: border-box;
 }
@@ -104,6 +148,108 @@ body {
 
 .brand-logo {
   display: block;
+}
+
+/* ---- Vitalparameter-Dokumentation (zweite Seite) ---- */
+.doc-main {
+  padding: 4px 16px 64px;
+}
+
+.doc-container {
+  max-width: 1180px;
+  margin: 0 auto;
+}
+
+.case-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding: 4px 0 12px;
+}
+
+.case-header__title {
+  font-size: 18px;
+  font-weight: 700;
+  color: #173029;
+}
+
+.case-header__meta {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+  color: #5a6a66;
+  font-size: 14px;
+  margin-top: 2px;
+}
+
+.case-header__meta strong {
+  color: #243b36;
+  font-weight: 600;
+}
+
+.case-header__back {
+  display: inline-block;
+  margin-top: 6px;
+  color: #1f7a63;
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.case-header__actions {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.case-started {
+  font-weight: 700;
+  color: #173029;
+  font-size: 16px;
+  padding: 8px 14px;
+  background: #eaf5ec;
+  border-radius: 8px;
+}
+
+.save-status {
+  font-size: 14px;
+  font-weight: 600;
+  min-height: 20px;
+  display: inline-flex;
+  align-items: center;
+}
+.save-status--saving {
+  color: #5a6a66;
+}
+.save-status--saved {
+  color: #237804;
+}
+.save-status--error {
+  color: #cf1322;
+}
+
+.timeline-surface {
+  width: 100%;
+  background: #ffffff;
+  border: 1px solid #e4ebe8;
+  border-radius: 14px;
+  padding: 8px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+  overflow: hidden;
+}
+
+.timeline-hint {
+  color: #6b7a76;
+  font-size: 13px;
+  margin: 10px 4px 0;
+}
+
+/* Sichtbarer Fokus fuer die Messpunkt-Hit-Areas (Tastaturbedienung). */
+.vital-hit:focus-visible {
+  outline: 2px solid #1f7a63;
+  outline-offset: 1px;
 }
 
 /* Kleiner, unaufdringlicher Offline-Hinweis. */
