@@ -101,11 +101,12 @@ export function migrateDateValue(value: unknown): string {
  */
 export function validateBirthDate(raw: string, now: Dayjs = dayjs()): string | null {
   const digits = onlyDigits(raw);
+  if (digits.length === 0) return null;
   if (digits.length >= 6) {
     const prefix = digits.slice(4, 6);
     if (prefix !== "19" && prefix !== "20") return TEXT.errorBirthYearPrefix;
   }
-  if (digits.length < 8) return null;
+  if (digits.length < 8) return TEXT.errorDateIncomplete;
   const parsed = parseDeDate(raw);
   if (!parsed) return TEXT.errorDateInvalid;
   const year = parsed.year();
@@ -120,7 +121,8 @@ export function validateBirthDate(raw: string, now: Dayjs = dayjs()): string | n
  */
 export function validateOpDate(raw: string, now: Dayjs = dayjs()): string | null {
   const digits = onlyDigits(raw);
-  if (digits.length < 8) return null;
+  if (digits.length === 0) return null;
+  if (digits.length < 8) return TEXT.errorDateIncomplete;
   const parsed = parseDeDate(raw);
   if (!parsed) return TEXT.errorDateInvalid;
   const earliest = now.subtract(7, "day").startOf("day");

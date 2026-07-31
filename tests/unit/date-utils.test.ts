@@ -64,9 +64,14 @@ describe("validateBirthDate", () => {
     expect(validateBirthDate("15.06.2000", now)).toBeNull();
   });
 
-  it("gibt keine Meldung bei unvollstaendiger Eingabe", () => {
-    expect(validateBirthDate("21", now)).toBeNull();
-    expect(validateBirthDate("21.12.", now)).toBeNull();
+  it("gibt keine Meldung bei leerem Feld", () => {
+    expect(validateBirthDate("", now)).toBeNull();
+  });
+
+  it("warnt bei unvollstaendiger Eingabe", () => {
+    const incomplete = "Bitte das Datum vollständig eingeben (TT.MM.JJJJ).";
+    expect(validateBirthDate("21", now)).toBe(incomplete);
+    expect(validateBirthDate("21.12.", now)).toBe(incomplete);
   });
 
   it("verlangt ein Jahr mit 19 oder 20", () => {
@@ -99,6 +104,11 @@ describe("validateOpDate", () => {
     expect(validateOpDate(now.format("DD.MM.YYYY"), now)).toBeNull();
     expect(validateOpDate(now.subtract(7, "day").format("DD.MM.YYYY"), now)).toBeNull();
     expect(validateOpDate(now.add(30, "day").format("DD.MM.YYYY"), now)).toBeNull();
+  });
+
+  it("warnt bei leerem/unvollstaendigem OP-Datum korrekt", () => {
+    expect(validateOpDate("", now)).toBeNull();
+    expect(validateOpDate("21.12", now)).toBe("Bitte das Datum vollständig eingeben (TT.MM.JJJJ).");
   });
 
   it("lehnt Daten aelter als sieben Tage ab", () => {

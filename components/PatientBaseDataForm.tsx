@@ -58,14 +58,16 @@ function Field({ name, htmlFor, status, error, children }: FieldProps) {
         {FIELD_LABELS[name]}
       </label>
       <div className={styles.controlRow}>
-        <div className={styles.control}>{children}</div>
+        <div className={styles.controlWrap}>
+          <div className={styles.control}>{children}</div>
+          {error ? (
+            <div className="field-error" role="alert" data-testid={`error-${name}`}>
+              {error}
+            </div>
+          ) : null}
+        </div>
         <AutosaveFieldStatus status={status} testId={`status-${name}`} />
       </div>
-      {error ? (
-        <div className="field-error" role="alert" data-testid={`error-${name}`}>
-          {error}
-        </div>
-      ) : null}
     </div>
   );
 }

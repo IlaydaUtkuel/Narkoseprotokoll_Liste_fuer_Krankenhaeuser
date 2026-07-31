@@ -29,13 +29,13 @@ test("Gewichtseinheit kg/lbs wird gespeichert", async ({ page }) => {
   await expect(page.getByTestId("field-bodyWeightKg")).toContainText("lbs");
 });
 
-test("Branding 'sikant Med' erscheint auf allen Routen", async ({ page }) => {
+test("Branding (Sikant-Med-Logo) erscheint auf allen Routen", async ({ page }) => {
   await expect(page.getByTestId("brand-mark")).toBeVisible();
-  await expect(page.getByTestId("brand-mark")).toHaveText("sikant Med");
+  await expect(page.getByTestId("brand-mark").locator("img")).toHaveAttribute("alt", "Sikant Med");
 
   await page.goto("/dokumentation");
   await expect(page.getByTestId("brand-mark")).toBeVisible();
-  await expect(page.getByTestId("brand-mark")).toHaveText("sikant Med");
+  await expect(page.getByTestId("brand-mark").locator("img")).toHaveAttribute("alt", "Sikant Med");
 });
 
 test("Gesamter Speicherstatus ist ein reiner Status ohne Rahmen/Button-Optik", async ({ page }) => {

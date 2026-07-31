@@ -3,8 +3,9 @@ import type { PatientBaseData, PatientField } from "../types/patient";
 // Eindeutiger, versionierter localStorage-Schluessel.
 export const STORAGE_KEY = "sikant-anesthesia-demo.patient-base-data.v1";
 
-// Debounce-Dauer pro Feld in Millisekunden (Anforderung: 2,5 Sekunden).
-export const AUTOSAVE_DELAY_MS = 2500;
+// Kurze Verzoegerung, bis nach dem Ende der Eingabe der Haken "✓ Gespeichert"
+// erscheint (reine Anzeige – gespeichert wird sofort bei jeder Aenderung).
+export const AUTOSAVE_DELAY_MS = 600;
 
 // Alle sichtbaren Texte zentral gehalten, damit UI und Tests exakt uebereinstimmen.
 export const TEXT = {
@@ -26,6 +27,7 @@ export const TEXT = {
   removedSuccess: "Alle Angaben wurden entfernt.",
   weiterButton: "Okay und Weiter",
   // Datumsvalidierung.
+  errorDateIncomplete: "Bitte das Datum vollständig eingeben (TT.MM.JJJJ).",
   errorBirthYearPrefix: "Das Geburtsjahr muss mit 19 oder 20 beginnen.",
   errorBirthYearRange: "Das Geburtsjahr muss zwischen 1900 und dem aktuellen Jahr liegen.",
   errorBirthFuture: "Das Geburtsdatum darf nicht in der Zukunft liegen.",

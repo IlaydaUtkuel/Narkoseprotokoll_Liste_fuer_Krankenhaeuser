@@ -27,11 +27,11 @@ body {
   outline-offset: 2px;
 }
 
-/* Statusanzeige pro Feld. */
+/* Statusanzeige pro Feld – auf gleicher Hoehe wie die erste Zeile des Eingabefeldes. */
 .field-status {
   font-size: 14px;
   line-height: 1.2;
-  min-height: 20px;
+  min-height: 44px;
   display: inline-flex;
   align-items: center;
   white-space: nowrap;
@@ -82,12 +82,12 @@ body {
   color: #cf1322;
 }
 
-/* Kurze, dezente Fehlermeldung unter einem Feld (z.B. Datumsvalidierung). */
+/* Kurze, dezente Fehlermeldung direkt unter dem Feld (z.B. Datumsvalidierung). */
 .field-error {
   color: #cf1322;
-  font-size: 13px;
+  font-size: 14px;
   line-height: 1.3;
-  margin-top: 2px;
+  margin-top: 0;
 }
 
 /* Dezente Markenanzeige links oben (auf jeder Route). */
@@ -100,21 +100,10 @@ body {
 .brand-mark {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
 }
 
-.brand-mark__plus {
-  width: 30px;
-  height: 30px;
-  display: inline-flex;
-  flex: none;
-}
-
-.brand-mark__text {
-  font-size: 20px;
-  font-weight: 700;
-  color: #1f7a63;
-  letter-spacing: 0.2px;
+.brand-logo {
+  display: block;
 }
 
 /* Kleiner, unaufdringlicher Offline-Hinweis. */

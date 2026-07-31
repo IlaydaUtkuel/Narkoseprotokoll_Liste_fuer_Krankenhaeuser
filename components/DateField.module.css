@@ -13,9 +13,10 @@
   color: #1f7a63;
 }
 
-/* AntD-DatePicker nur fuer den Kalender – das Eingabefeld darueber ist sichtbar. */
+/* AntD-DatePicker nur fuer den Kalender – das Eingabefeld darueber ist sichtbar.
+   !important, weil AntD auf .ant-picker selbst position: relative setzt. */
 .hiddenPicker {
-  position: absolute;
+  position: absolute !important;
   inset: 0;
   opacity: 0;
   pointer-events: none;

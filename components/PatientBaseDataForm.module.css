@@ -24,15 +24,21 @@
 
 .controlRow {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 12px;
-  flex-wrap: wrap;
 }
 
-/* Eingabefeld nimmt den Platz ein, der Status steht rechts daneben.
-   Auf schmalen Bildschirmen bricht der Status unter das Feld um. */
+/* Feld + eventuelle Fehlermeldung in einer Spalte; der Status steht rechts daneben
+   und ist auf gleicher Hoehe wie die erste Zeile des Feldes ausgerichtet. */
+.controlWrap {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
 .control {
-  flex: 1 1 260px;
   min-width: 0;
 }
 
