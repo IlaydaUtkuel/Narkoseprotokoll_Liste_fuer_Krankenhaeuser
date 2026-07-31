@@ -1,22 +1,29 @@
-import type { PatientBaseData } from "../types/patient";
+import type { PatientBaseData, WeightUnit } from "../types/patient";
 import { createEmptyPatientData } from "./constants";
+import { migrateDateValue } from "./date-utils";
 
 const ASA_VALUES = ["I", "II", "III", "IV"] as const;
 type AsaValue = (typeof ASA_VALUES)[number];
-
-function isIsoDate(value: unknown): value is string {
-  return typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value);
-}
 
 function isAsaValue(value: unknown): value is AsaValue {
   return typeof value === "string" && (ASA_VALUES as readonly string[]).includes(value);
 }
 
+function isWeightUnit(value: unknown): value is WeightUnit {
+  return value === "kg" || value === "lbs";
+}
+
 /**
- * Nimmt einen beliebigen (z.B. aus JSON geparsten) Wert entgegen und liefert
- * ein sauberes PatientBaseData-Objekt. Ungueltige Einzelfelder werden auf ihren
- * leeren Standard zurueckgesetzt. Ist der Wert ueberhaupt kein Objekt, wird null
+ * Nimmt einen beliebigen (z.B. aus JSON geparsten) Wert entgegen und liefert ein
+ * sauberes PatientBaseData-Objekt. Ungueltige Einzelfelder werden auf sichere
+ * Standardwerte zurueckgesetzt. Ist der Wert ueberhaupt kein Objekt, wird null
  * zurueckgegeben. Diese Funktion wirft nie.
+ *
+ * Datenmigration:
+ * - Datumsfelder werden ueber migrateDateValue geladen: bestehende ISO-Werte
+ *   ("YYYY-MM-DD") werden in das sichtbare Format "TT.MM.JJJJ" umgewandelt,
+ *   Teilangaben bleiben erhalten.
+ * - Fehlt das neue Feld weightUnit (aeltere Daten), wird "kg" verwendet.
  */
 export function parsePatientData(raw: unknown): PatientBaseData | null {
   if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
@@ -27,13 +34,14 @@ export function parsePatientData(raw: unknown): PatientBaseData | null {
 
   return {
     patientName: typeof o.patientName === "string" ? o.patientName : base.patientName,
-    birthDate: isIsoDate(o.birthDate) ? o.birthDate : null,
+    birthDate: migrateDateValue(o.birthDate),
     procedure: typeof o.procedure === "string" ? o.procedure : base.procedure,
-    operationDate: isIsoDate(o.operationDate) ? o.operationDate : null,
+    operationDate: migrateDateValue(o.operationDate),
     bodyWeightKg:
       typeof o.bodyWeightKg === "number" && Number.isFinite(o.bodyWeightKg)
         ? o.bodyWeightKg
         : null,
+    weightUnit: isWeightUnit(o.weightUnit) ? o.weightUnit : "kg",
     asaClass: isAsaValue(o.asaClass) ? o.asaClass : null,
     mallampatiClass: isAsaValue(o.mallampatiClass) ? o.mallampatiClass : null,
     allergies: typeof o.allergies === "string" ? o.allergies : base.allergies,

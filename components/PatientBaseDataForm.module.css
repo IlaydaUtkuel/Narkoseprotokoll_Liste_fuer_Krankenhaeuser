@@ -42,3 +42,12 @@
   font-size: 18px;
   font-weight: 600;
 }
+
+/* Die Einheitenauswahl (kg/lbs) bleibt kompakt wie die bisherige Einheitenbox. */
+.weightInput :global(.ant-input-number-addon) {
+  padding: 0;
+}
+
+.weightUnitSelect {
+  min-width: 64px;
+}

@@ -1,0 +1,22 @@
+.dateField {
+  position: relative;
+}
+
+.calendarIcon {
+  cursor: pointer;
+  color: rgba(0, 0, 0, 0.45);
+  display: inline-flex;
+  align-items: center;
+}
+
+.calendarIcon:hover {
+  color: #1f7a63;
+}
+
+/* AntD-DatePicker nur fuer den Kalender – das Eingabefeld darueber ist sichtbar. */
+.hiddenPicker {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  pointer-events: none;
+}

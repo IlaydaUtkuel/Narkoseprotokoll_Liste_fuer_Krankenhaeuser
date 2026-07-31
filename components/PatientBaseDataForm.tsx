@@ -2,10 +2,9 @@
 
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
-import { Button, DatePicker, Input, InputNumber, Select } from "antd";
-import dayjs from "dayjs";
-import customParseFormat from "dayjs/plugin/customParseFormat";
+import { Button, Input, InputNumber, Select } from "antd";
 import { AutosaveFieldStatus } from "./AutosaveFieldStatus";
+import { DateField } from "./DateField";
 import { GlobalSaveStatus } from "./GlobalSaveStatus";
 import { OfflineStatus } from "./OfflineStatus";
 import { RemoveAllData } from "./RemoveAllData";
@@ -17,18 +16,26 @@ import {
 } from "../lib/patient-storage";
 import {
   ASA_OPTIONS,
-  DATE_FORMAT,
   FIELD_LABELS,
   FIELD_ORDER,
   MALLAMPATI_OPTIONS,
   TEXT,
+  WEIGHT_UNIT_OPTIONS,
   createEmptyPatientData,
 } from "../lib/constants";
-import type { FieldSaveStatus, PatientBaseData, PatientField } from "../types/patient";
+import {
+  isBirthDateDisabled,
+  isOpDateDisabled,
+  validateBirthDate,
+  validateOpDate,
+} from "../lib/date-utils";
+import type {
+  FieldSaveStatus,
+  PatientBaseData,
+  PatientField,
+  WeightUnit,
+} from "../types/patient";
 import styles from "./PatientBaseDataForm.module.css";
-
-// Erlaubt das Tippen eines Datums im deutschen Format.
-dayjs.extend(customParseFormat);
 
 function hasValue(value: unknown): boolean {
   return value !== null && value !== undefined && value !== "";
@@ -38,11 +45,13 @@ interface FieldProps {
   name: PatientField;
   htmlFor: string;
   status?: FieldSaveStatus;
+  error?: string | null;
   children: ReactNode;
 }
 
-// Einheitliches Layout: Beschriftung oben, Eingabefeld und Status in einer Zeile.
-function Field({ name, htmlFor, status, children }: FieldProps) {
+// Einheitliches Layout: Beschriftung oben, Eingabefeld und Status in einer Zeile,
+// darunter bei Bedarf eine kurze Fehlermeldung.
+function Field({ name, htmlFor, status, error, children }: FieldProps) {
   return (
     <div className={styles.field} data-testid={`field-${name}`}>
       <label className={styles.label} htmlFor={htmlFor}>
@@ -52,6 +61,11 @@ function Field({ name, htmlFor, status, children }: FieldProps) {
         <div className={styles.control}>{children}</div>
         <AutosaveFieldStatus status={status} testId={`status-${name}`} />
       </div>
+      {error ? (
+        <div className="field-error" role="alert" data-testid={`error-${name}`}>
+          {error}
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -60,19 +74,13 @@ export function PatientBaseDataForm() {
   const router = useRouter();
   const [data, setData] = useState<PatientBaseData>(() => createEmptyPatientData());
 
-  // dataRef spiegelt stets den zuletzt bestaetigten Stand und dient als Quelle
-  // beim (spaeter ausgeloesten) Speichern. Aktualisierung erfolgt im Effekt.
+  // dataRef spiegelt stets den aktuellen Stand und dient als Quelle beim Speichern.
   const dataRef = useRef<PatientBaseData>(data);
   useEffect(() => {
     dataRef.current = data;
   }, [data]);
 
-  // Schreibt immer den aktuellsten Stand samt frischem Zeitstempel.
-  const persist = useCallback(() => {
-    savePatientData({ ...dataRef.current, updatedAt: new Date().toISOString() });
-  }, []);
-
-  const { statuses, scheduleSave, markSaved, resetStatuses } = useDebouncedFieldSave({ persist });
+  const { statuses, reportSaving, reportError, markSaved, resetStatuses } = useDebouncedFieldSave();
 
   // Beim ersten Rendern (nur im Browser) gespeicherte Daten laden.
   useEffect(() => {
@@ -90,18 +98,72 @@ export function PatientBaseDataForm() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Zusaetzliche Absicherung: den aktuellsten Stand beim Verlassen/Ausblenden schreiben.
+  // Die Hauptspeicherung erfolgt jedoch sofort bei jeder Aenderung (siehe applyChange).
+  useEffect(() => {
+    const flush = () => {
+      try {
+        savePatientData(dataRef.current);
+      } catch {
+        // Bewusst ignoriert – der Wert wurde bereits bei der Aenderung gespeichert.
+      }
+    };
+    const onVisibility = () => {
+      if (document.visibilityState === "hidden") flush();
+    };
+    window.addEventListener("pagehide", flush);
+    window.addEventListener("beforeunload", flush);
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      window.removeEventListener("pagehide", flush);
+      window.removeEventListener("beforeunload", flush);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, []);
+
+  // Wendet eine Aenderung an: aktualisiert den State und speichert SOFORT (synchron)
+  // nach localStorage. Der Anzeige-Status ("Wird gespeichert …" -> "✓ Gespeichert")
+  // laeuft davon unabhaengig ueber den Timer im Hook.
+  const applyChange = useCallback(
+    (patch: Partial<PatientBaseData>, statusField: PatientField) => {
+      const next: PatientBaseData = {
+        ...dataRef.current,
+        ...patch,
+        updatedAt: new Date().toISOString(),
+      };
+      dataRef.current = next;
+      setData(next);
+      try {
+        savePatientData(next);
+        reportSaving(statusField);
+      } catch {
+        reportError(statusField);
+      }
+    },
+    [reportSaving, reportError],
+  );
+
   const handleChange = useCallback(
     <K extends PatientField>(field: K, value: PatientBaseData[K]) => {
-      setData((prev) => ({ ...prev, [field]: value }) as PatientBaseData);
-      scheduleSave(field);
+      applyChange({ [field]: value } as Partial<PatientBaseData>, field);
     },
-    [scheduleSave],
+    [applyChange],
+  );
+
+  const handleWeightUnit = useCallback(
+    (unit: WeightUnit) => {
+      applyChange({ weightUnit: unit }, "bodyWeightKg");
+    },
+    [applyChange],
   );
 
   const handleRemoved = useCallback(() => {
     setData(createEmptyPatientData());
     resetStatuses();
   }, [resetStatuses]);
+
+  const birthError = validateBirthDate(data.birthDate);
+  const opError = validateOpDate(data.operationDate);
 
   return (
     <div className={styles.formWrap}>
@@ -119,16 +181,15 @@ export function PatientBaseDataForm() {
           />
         </Field>
 
-        <Field name="birthDate" htmlFor="birthDate" status={statuses.birthDate}>
-          <DatePicker
+        <Field name="birthDate" htmlFor="birthDate" status={statuses.birthDate} error={birthError}>
+          <DateField
             id="birthDate"
-            value={data.birthDate ? dayjs(data.birthDate) : null}
-            onChange={(d) => handleChange("birthDate", d ? d.format("YYYY-MM-DD") : null)}
-            format={DATE_FORMAT}
-            placeholder="TT.MM.JJJJ"
-            allowClear
-            inputReadOnly={false}
-            style={{ width: "100%" }}
+            testId="input-birthDate"
+            value={data.birthDate}
+            onChange={(raw) => handleChange("birthDate", raw)}
+            enforceYearCentury
+            disabledDate={isBirthDateDisabled}
+            ariaInvalid={Boolean(birthError)}
           />
         </Field>
 
@@ -143,25 +204,39 @@ export function PatientBaseDataForm() {
           />
         </Field>
 
-        <Field name="operationDate" htmlFor="operationDate" status={statuses.operationDate}>
-          <DatePicker
+        <Field
+          name="operationDate"
+          htmlFor="operationDate"
+          status={statuses.operationDate}
+          error={opError}
+        >
+          <DateField
             id="operationDate"
-            value={data.operationDate ? dayjs(data.operationDate) : null}
-            onChange={(d) => handleChange("operationDate", d ? d.format("YYYY-MM-DD") : null)}
-            format={DATE_FORMAT}
-            placeholder="TT.MM.JJJJ"
-            allowClear
-            inputReadOnly={false}
-            style={{ width: "100%" }}
+            testId="input-operationDate"
+            value={data.operationDate}
+            onChange={(raw) => handleChange("operationDate", raw)}
+            disabledDate={isOpDateDisabled}
+            ariaInvalid={Boolean(opError)}
           />
         </Field>
 
         <Field name="bodyWeightKg" htmlFor="bodyWeightKg" status={statuses.bodyWeightKg}>
           <InputNumber
             id="bodyWeightKg"
+            className={styles.weightInput}
             value={data.bodyWeightKg}
             onChange={(v) => handleChange("bodyWeightKg", (v as number | null) ?? null)}
-            addonAfter="kg"
+            addonAfter={
+              <Select
+                value={data.weightUnit}
+                onChange={(u) => handleWeightUnit(u as WeightUnit)}
+                options={[...WEIGHT_UNIT_OPTIONS]}
+                className={styles.weightUnitSelect}
+                variant="borderless"
+                aria-label="Einheit"
+                popupMatchSelectWidth={false}
+              />
+            }
             min={0}
             max={500}
             step={0.5}

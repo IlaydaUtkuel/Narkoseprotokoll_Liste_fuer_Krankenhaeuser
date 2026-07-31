@@ -25,7 +25,22 @@ export const TEXT = {
   removeConfirmCancel: "Abbrechen",
   removedSuccess: "Alle Angaben wurden entfernt.",
   weiterButton: "Okay und Weiter",
+  // Datumsvalidierung.
+  errorBirthYearPrefix: "Das Geburtsjahr muss mit 19 oder 20 beginnen.",
+  errorBirthYearRange: "Das Geburtsjahr muss zwischen 1900 und dem aktuellen Jahr liegen.",
+  errorBirthFuture: "Das Geburtsdatum darf nicht in der Zukunft liegen.",
+  errorOpDatePast: "Das OP-Datum darf höchstens sieben Tage zurückliegen.",
+  errorDateInvalid: "Bitte ein gültiges Datum eingeben.",
 } as const;
+
+// Auswahlwerte fuer die Gewichtseinheit.
+export const WEIGHT_UNIT_OPTIONS = [
+  { label: "kg", value: "kg" },
+  { label: "lbs", value: "lbs" },
+] as const;
+
+// Platzhalter fuer die Datumsfelder.
+export const DATE_PLACEHOLDER = "TT.MM.JJJJ";
 
 // Auswahlwerte fuer die ASA-Klasse: Anzeige "ASA I", gespeicherter Wert "I".
 export const ASA_OPTIONS = [
@@ -74,10 +89,11 @@ export const DATE_FORMAT = "DD.MM.YYYY";
 export function createEmptyPatientData(): PatientBaseData {
   return {
     patientName: "",
-    birthDate: null,
+    birthDate: "",
     procedure: "",
-    operationDate: null,
+    operationDate: "",
     bodyWeightKg: null,
+    weightUnit: "kg",
     asaClass: null,
     mallampatiClass: null,
     allergies: "",
