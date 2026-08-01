@@ -13,6 +13,8 @@
   --timeline-now-dark: #15803d;
   --timeline-now-line: #4ade80;
   --timeline-grid: #e4ebe8;
+  --timeline-grid-major: #b9cbc5;
+  --timeline-grid-minor: rgba(185, 203, 197, 0.42);
   --timeline-axis-text: #5a6a66;
   --timeline-band-title: #243b36;
 }
@@ -42,6 +44,14 @@
   fill: var(--timeline-band-title);
   font-size: 12px;
   font-weight: 600;
+}
+.timeline-grid-minor {
+  stroke: var(--timeline-grid-minor);
+  stroke-width: 0.7;
+}
+.timeline-grid-major {
+  stroke: var(--timeline-grid-major);
+  stroke-width: 1.35;
 }
 
 * {
@@ -213,6 +223,15 @@ body {
   border-radius: 8px;
 }
 
+.case-ended {
+  font-weight: 700;
+  color: #8a341f;
+  font-size: 14px;
+  padding: 5px 8px;
+  background: #fff2e8;
+  border-radius: 8px;
+}
+
 .save-status {
   font-size: 14px;
   font-weight: 600;
@@ -240,6 +259,162 @@ body {
   overflow: hidden;
 }
 
+.therapy-toolbar {
+  display: grid;
+  gap: 8px;
+  margin: 4px 0 10px;
+  padding: 10px;
+  background: #fff;
+  border: 1px solid #e4ebe8;
+  border-radius: 12px;
+}
+
+.event-actions .ant-btn {
+  font-size: 12px;
+}
+
+.therapy-lane {
+  fill: #fbfdfc;
+  stroke: #e1ebe7;
+  stroke-width: 1;
+}
+
+.therapy-lane--medications {
+  fill: #fbf8ff;
+}
+
+.therapy-lane--infusions {
+  fill: #f5fbff;
+}
+
+.therapy-lane--events {
+  fill: #fbfcf7;
+}
+
+.therapy-duration {
+  stroke-width: 0;
+}
+
+.therapy-duration--medication {
+  fill: rgba(114, 46, 209, 0.075);
+}
+
+.therapy-duration--infusion {
+  fill: rgba(8, 145, 178, 0.065);
+}
+
+.therapy-start-line {
+  stroke-width: 1.35;
+  stroke-dasharray: 3 3;
+}
+
+.therapy-start-line--medication {
+  stroke: #722ed1;
+}
+
+.therapy-start-line--infusion {
+  stroke: #0891b2;
+}
+
+.therapy-marker-dot--medication {
+  fill: #722ed1;
+}
+
+.therapy-marker-dot--infusion {
+  fill: #0891b2;
+}
+
+.therapy-marker-label,
+.event-marker-label {
+  fill: #203a34;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.therapy-marker-time,
+.event-marker-time {
+  fill: var(--timeline-axis-text);
+  font-size: 10px;
+}
+
+.timeline-event-line {
+  stroke: #8b5e00;
+  stroke-width: 1.5;
+  stroke-dasharray: 5 3;
+}
+
+.event-marker-circle {
+  fill: #fff7d6;
+  stroke: #8b5e00;
+  stroke-width: 1.5;
+}
+
+.event-marker-symbol {
+  fill: #694600;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.therapy-marker-focus:focus-visible,
+.event-marker-focus:focus-visible {
+  outline: 2px solid #1f7a63;
+  outline-offset: 2px;
+}
+
+.event-drag-tooltip {
+  fill: rgba(23, 48, 41, 0.94);
+}
+
+.event-drag-tooltip-text {
+  fill: #fff;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.crosshair-vertical {
+  stroke: #63887d;
+  stroke-width: 1;
+  stroke-dasharray: 4 4;
+}
+
+.crosshair-horizontal {
+  stroke: #79c9a4;
+  stroke-width: 1;
+}
+
+.crosshair-center {
+  stroke: #285f4c;
+  stroke-width: 1.5;
+}
+
+.crosshair-tooltip {
+  fill: rgba(23, 48, 41, 0.94);
+}
+
+.crosshair-tooltip-text {
+  fill: #fff;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.crosshair-tooltip-warning {
+  fill: #ffd591;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.therapy-form-shell {
+  max-width: 720px;
+  margin: 0 auto;
+}
+
+.event-form-name {
+  margin-bottom: 14px;
+  font-size: 16px;
+  font-weight: 700;
+  color: #173029;
+}
+
 .timeline-hint {
   color: #6b7a76;
   font-size: 13px;
@@ -250,6 +425,20 @@ body {
 .vital-hit:focus-visible {
   outline: 2px solid #1f7a63;
   outline-offset: 1px;
+}
+
+@media (max-width: 860px) {
+  .doc-main {
+    padding-inline: 8px;
+  }
+
+  .timeline-surface {
+    padding: 4px;
+  }
+
+  .therapy-toolbar {
+    padding: 8px;
+  }
 }
 
 /* Kleiner, unaufdringlicher Offline-Hinweis. */

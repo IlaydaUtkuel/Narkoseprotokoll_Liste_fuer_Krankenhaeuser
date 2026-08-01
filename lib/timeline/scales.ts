@@ -20,9 +20,11 @@ export function computeDomain(
   startedAt: number | null,
   now: number,
   futureWindow: number = FUTURE_WINDOW_MS,
+  endedAt: number | null = null,
 ): TimelineDomain {
   const start = startedAt ?? now;
-  const end = Math.max(now, start) + futureWindow;
+  const effectiveNow = endedAt ?? now;
+  const end = Math.max(effectiveNow, start) + futureWindow;
   return { start, end };
 }
 

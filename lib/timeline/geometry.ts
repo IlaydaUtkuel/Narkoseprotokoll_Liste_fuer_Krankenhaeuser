@@ -18,6 +18,10 @@ export interface TimelineLayout {
   plotWidth: number;
   bands: BandLayout[];
   bandByKind: Record<VitalKind, BandLayout>;
+  contentTop: number;
+  therapyTop: number;
+  therapyBottom: number;
+  therapyLanes: Array<{ kind: "medications" | "infusions" | "events"; top: number; bottom: number; height: number }>;
   plotTop: number;
   plotBottom: number; // unterer Rand des letzten Bandes (Basis der Zeitachse)
   axisY: number;
@@ -30,6 +34,18 @@ export function computeTimelineLayout(width: number): TimelineLayout {
   const plotWidth = plotRight - plotLeft;
 
   let y = LAYOUT.marginTop;
+  const therapyTop = y;
+  const therapyLanes: TimelineLayout["therapyLanes"] = [];
+  for (const kind of ["medications", "infusions", "events"] as const) {
+    const top = y;
+    const height = kind === "events" ? LAYOUT.eventLaneHeight : LAYOUT.therapyLaneHeight;
+    const bottom = top + height;
+    therapyLanes.push({ kind, top, bottom, height });
+    y = bottom + LAYOUT.therapyLaneGap;
+  }
+  const therapyBottom = y - LAYOUT.therapyLaneGap;
+  y = therapyBottom + LAYOUT.therapyGapAfter;
+  const vitalsTop = y;
   const bands: BandLayout[] = [];
   for (const kind of BAND_ORDER) {
     const height = VITAL_CONFIG[kind].height;
@@ -61,7 +77,11 @@ export function computeTimelineLayout(width: number): TimelineLayout {
     plotWidth,
     bands,
     bandByKind,
-    plotTop: LAYOUT.marginTop,
+    contentTop: LAYOUT.marginTop,
+    therapyTop,
+    therapyBottom,
+    therapyLanes,
+    plotTop: vitalsTop,
     plotBottom,
     axisY: plotBottom,
   };

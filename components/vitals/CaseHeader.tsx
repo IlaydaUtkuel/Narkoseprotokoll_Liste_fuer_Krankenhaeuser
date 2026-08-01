@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { StartControl } from "./StartControl";
 import { SaveStatusView } from "./SaveStatusView";
+import { EndControl } from "./EndControl";
 import type { PatientBaseData } from "../../types/patient";
 
 interface Props {
@@ -39,6 +40,7 @@ export function CaseHeader({ patient }: Props) {
       </div>
       <div className="case-header__actions">
         <StartControl />
+        <EndControl />
         <SaveStatusView />
       </div>
     </div>

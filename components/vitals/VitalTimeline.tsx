@@ -1,17 +1,18 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { App } from "antd";
 import { BAND_ORDER, VITAL_CONFIG } from "../../lib/timeline/config";
 import { computeTimelineLayout } from "../../lib/timeline/geometry";
+import { findNearestHit, type HitTarget } from "../../lib/timeline/hitTesting";
 import { buildXScale, buildYScales, computeDomain, timeToX, xToTime } from "../../lib/timeline/scales";
-import { relativeFiveMinuteTicks } from "../../lib/timeline/timeTicks";
-import { mapPointerToTimeline } from "../../lib/timeline/pointerMapping";
-import { clampValue, findNearestSameKind, roundToPrecision } from "../../lib/timeline/measurementUtils";
-import { formatVitalNumber } from "../../lib/timeline/format";
+import { relativeTimelineTicks } from "../../lib/timeline/timeTicks";
+import { mapPointerToTimeline, type PointerMapResult } from "../../lib/timeline/pointerMapping";
+import { clampValue, roundToPrecision } from "../../lib/timeline/measurementUtils";
+import { formatClock, formatVitalNumber } from "../../lib/timeline/format";
+import { maxDocumentableTime } from "../../lib/timeline/timeValidation";
 import { useCurrentTime } from "../../hooks/useCurrentTime";
 import { useElementSize } from "../../hooks/useElementSize";
-import { usePointerGesture } from "../../hooks/useTimelinePointer";
 import { useCaseStore } from "../../store/anesthesiaCaseStore";
 import { TimeGrid } from "./TimeGrid";
 import { VitalBandBackground } from "./VitalBandBackground";
@@ -20,151 +21,290 @@ import { LineBand } from "./LineBand";
 import { NibpBand } from "./NibpBand";
 import { CurrentTimeIndicator } from "./CurrentTimeIndicator";
 import { VitalEntryDrawer } from "./VitalEntryDrawer";
-import type { BandContext, DragPreview, EntryDraft } from "./timelineTypes";
+import { TherapyEntryDrawer } from "./TherapyEntryDrawer";
+import { TherapyToolbar } from "./TherapyToolbar";
+import {
+  TherapyDurationLayer,
+  TherapyLaneBackgrounds,
+  TherapyMarkerLayer,
+} from "./TherapyLayers";
+import type { BandContext, DragPreview, EntryDraft, TherapyDraft } from "./timelineTypes";
 import type { Measurement, NibpMeasurement, ScalarMeasurement, VitalKind } from "../../types/vitals";
 
 const MIN_WIDTH = 320;
 const NOW_INTERVAL_MS = 250;
+const DRAG_THRESHOLD_PX = 9;
+
+type CursorMap = Extract<PointerMapResult, { svgX: number }>;
+type CrosshairState = CursorMap & { locked: boolean };
+
+interface PlotPointerState {
+  active: boolean;
+  pointerId: number;
+  pointerType: string;
+  startX: number;
+  startY: number;
+  moved: boolean;
+  dragging: boolean;
+  targetId: string | null;
+}
+
+const EMPTY_POINTER: PlotPointerState = {
+  active: false,
+  pointerId: -1,
+  pointerType: "mouse",
+  startX: 0,
+  startY: 0,
+  moved: false,
+  dragging: false,
+  targetId: null,
+};
 
 export function VitalTimeline() {
   const { message } = App.useApp();
   const [containerRef, size] = useElementSize<HTMLDivElement>();
   const svgRef = useRef<SVGSVGElement | null>(null);
-  const now = useCurrentTime(NOW_INTERVAL_MS);
+  const pointerRef = useRef<PlotPointerState>({ ...EMPTY_POINTER });
 
-  const startedAt = useCaseStore((s) => s.startedAt);
-  const measurements = useCaseStore((s) => s.measurements);
-  const updateScalar = useCaseStore((s) => s.updateScalar);
+  const startedAt = useCaseStore((state) => state.startedAt);
+  const endedAt = useCaseStore((state) => state.endedAt);
+  const measurements = useCaseStore((state) => state.measurements);
+  const medications = useCaseStore((state) => state.medications);
+  const infusions = useCaseStore((state) => state.infusions);
+  const events = useCaseStore((state) => state.events);
+  const updateScalar = useCaseStore((state) => state.updateScalar);
+  const updateEventTime = useCaseStore((state) => state.updateEventTime);
 
+  const now = useCurrentTime(NOW_INTERVAL_MS, endedAt);
   const [draft, setDraft] = useState<EntryDraft | null>(null);
+  const [therapyDraft, setTherapyDraft] = useState<TherapyDraft | null>(null);
   const [dragPreview, setDragPreview] = useState<DragPreview | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [crosshair, setCrosshair] = useState<CrosshairState | null>(null);
 
   const width = Math.max(MIN_WIDTH, Math.round(size.width) || MIN_WIDTH);
   const layout = useMemo(() => computeTimelineLayout(width), [width]);
   const yScales = useMemo(() => buildYScales(layout), [layout]);
-
-  // Reiner Fallback vor dem Mount (dann wird ohnehin nur das Skelett gerendert).
   const nowValue = now ?? 0;
-  const domain = computeDomain(startedAt, nowValue);
+  const domain = computeDomain(startedAt, nowValue, undefined, endedAt);
   const xScale = useMemo(
     () => buildXScale({ start: domain.start, end: domain.end }, layout),
     [domain.start, domain.end, layout],
   );
   const ticks = useMemo(
-    () => relativeFiveMinuteTicks(domain.start, domain.end),
+    () => relativeTimelineTicks(domain.start, domain.end),
     [domain.start, domain.end],
   );
 
   const scalarsOf = (kind: VitalKind) =>
-    measurements.filter((m): m is ScalarMeasurement => m.kind === kind);
-  const nibps = measurements.filter((m): m is NibpMeasurement => m.kind === "nibp");
+    measurements.filter((measurement): measurement is ScalarMeasurement => measurement.kind === kind);
+  const nibps = measurements.filter((measurement): measurement is NibpMeasurement => measurement.kind === "nibp");
 
   const lastByKind = useMemo(() => {
-    const map: Record<VitalKind, string | null> = {
-      spo2: null,
-      heartRate: null,
-      nibp: null,
-      temperature: null,
-    };
+    const map: Record<VitalKind, string | null> = { spo2: null, heartRate: null, nibp: null, temperature: null };
     for (const kind of BAND_ORDER) {
-      const list = [...measurements].filter((m) => m.kind === kind).sort((a, b) => a.time - b.time);
+      const list = measurements.filter((measurement) => measurement.kind === kind).sort((a, b) => a.time - b.time);
       const last = list[list.length - 1];
       if (!last) continue;
-      if (last.kind === "nibp") map.nibp = `${last.systolic}/${last.diastolic} (MAD ${last.mean})`;
-      else map[kind] = `${formatVitalNumber(kind, last.value)} ${VITAL_CONFIG[kind].unit}`;
+      map[kind] = last.kind === "nibp"
+        ? `${last.systolic}/${last.diastolic} (MAD ${last.mean})`
+        : `${formatVitalNumber(kind, last.value)} ${VITAL_CONFIG[kind].unit}`;
     }
     return map;
   }, [measurements]);
 
-  const openEdit = (m: Measurement) => {
-    setSelectedId(m.id);
-    if (m.kind === "nibp") {
+  const hitTargets = useMemo<HitTarget[]>(
+    () => measurements.map((measurement) => {
+      const x = timeToX(xScale, measurement.time);
+      if (measurement.kind === "nibp") {
+        const scale = yScales.nibp;
+        return {
+          id: measurement.id,
+          shape: "nibp" as const,
+          x,
+          y1: scale(measurement.systolic),
+          y2: scale(measurement.diastolic),
+          meanY: scale(measurement.mean),
+        };
+      }
+      return { id: measurement.id, shape: "point" as const, x, y: yScales[measurement.kind](measurement.value) };
+    }),
+    [measurements, xScale, yScales],
+  );
+
+  const openEdit = (measurement: Measurement) => {
+    setSelectedId(measurement.id);
+    setCrosshair(crosshairForMeasurement(measurement, xScale, yScales));
+    if (measurement.kind === "nibp") {
       setDraft({
         mode: "edit-nibp",
-        id: m.id,
-        time: m.time,
-        systolic: m.systolic,
-        mean: m.mean,
-        diastolic: m.diastolic,
+        id: measurement.id,
+        time: measurement.time,
+        systolic: measurement.systolic,
+        mean: measurement.mean,
+        diastolic: measurement.diastolic,
       });
     } else {
-      setDraft({ mode: "edit-scalar", id: m.id, kind: m.kind, time: m.time, value: m.value });
+      setDraft({
+        mode: "edit-scalar",
+        id: measurement.id,
+        kind: measurement.kind,
+        time: measurement.time,
+        value: measurement.value,
+      });
     }
   };
 
-  const handleCreateTap = (clientX: number, clientY: number) => {
-    if (startedAt === null) {
-      message.info("Bitte starten Sie zuerst den Fall.");
-      return;
-    }
-    const svg = svgRef.current;
-    if (!svg) return;
-    const rect = svg.getBoundingClientRect();
-    const result = mapPointerToTimeline({
+  const mapPointer = (clientX: number, clientY: number): PointerMapResult => {
+    if (startedAt === null || !svgRef.current) return { ok: false, reason: "outside" };
+    return mapPointerToTimeline({
       clientX,
       clientY,
-      rect,
+      rect: svgRef.current.getBoundingClientRect(),
       layout,
       xScale,
       yScales,
       startedAt,
       now: nowValue,
+      endedAt,
     });
-    if (!result.ok) {
-      if (result.reason === "future") {
-        message.warning("Zukünftige Werte können nicht dokumentiert werden.");
-      } else if (result.reason === "beforeStart") {
-        message.warning("Werte vor dem Start können nicht dokumentiert werden.");
+  };
+
+  const openCreate = (mapped: CursorMap) => {
+    if (!mapped.ok) {
+      if (mapped.reason === "future") message.warning("Zukünftige Werte können nicht dokumentiert werden.");
+      if (mapped.reason === "beforeStart") message.warning("Werte vor dem Start können nicht dokumentiert werden.");
+      if (mapped.reason === "afterEnd") {
+        message.error("Nach dem Ende des Eingriffs können keine neuen Einträge dokumentiert werden.");
       }
+      setCrosshair({ ...mapped, locked: false });
       return;
     }
-
-    const nearest = findNearestSameKind(measurements, result.kind, result.time);
-    if (nearest) {
-      openEdit(nearest);
-      return;
-    }
-
     setSelectedId(null);
-    if (result.kind === "nibp") {
-      setDraft({ mode: "create-nibp", time: result.time });
+    setCrosshair({ ...mapped, locked: true });
+    if (mapped.kind === "nibp") {
+      setDraft({ mode: "create-nibp", time: mapped.time, mean: mapped.pointerValue });
     } else {
-      const fallback = VITAL_CONFIG[result.kind].min;
-      setDraft({
-        mode: "create-scalar",
-        kind: result.kind,
-        time: result.time,
-        value: result.value ?? fallback,
-      });
+      setDraft({ mode: "create-scalar", kind: mapped.kind, time: mapped.time, value: mapped.pointerValue });
     }
   };
 
-  const onScalarDragMove = (m: ScalarMeasurement, clientX: number, clientY: number) => {
-    const svg = svgRef.current;
-    if (!svg || startedAt === null) return;
-    const rect = svg.getBoundingClientRect();
+  const onScalarDragMove = (measurement: ScalarMeasurement, clientX: number, clientY: number) => {
+    if (!svgRef.current || startedAt === null) return;
+    const rect = svgRef.current.getBoundingClientRect();
     const svgX = clampValue(clientX - rect.left, layout.plotLeft, layout.plotRight);
     const svgY = clientY - rect.top;
-    let t = xToTime(xScale, svgX);
-    t = clampValue(t, startedAt, nowValue);
-    const c = VITAL_CONFIG[m.kind];
-    const v = roundToPrecision(clampValue(yScales[m.kind].invert(svgY), c.min, c.max), c.precision);
-    setDragPreview({ id: m.id, kind: m.kind, time: t, value: v });
+    const upperTime = maxDocumentableTime(nowValue, endedAt);
+    const time = clampValue(xToTime(xScale, svgX), startedAt, upperTime);
+    const config = VITAL_CONFIG[measurement.kind];
+    const value = roundToPrecision(
+      clampValue(yScales[measurement.kind].invert(svgY), config.min, config.max),
+      config.precision,
+    );
+    setDragPreview({ id: measurement.id, kind: measurement.kind, time, value });
+    setCrosshair({
+      ok: true,
+      kind: measurement.kind,
+      time,
+      value,
+      pointerValue: value,
+      svgX,
+      svgY: yScales[measurement.kind](value),
+      locked: true,
+    });
   };
 
-  const onScalarDragEnd = (m: ScalarMeasurement) => {
-    if (dragPreview && dragPreview.id === m.id) {
-      updateScalar(m.id, dragPreview.time, dragPreview.value);
+  const finishScalarDrag = (measurement: ScalarMeasurement) => {
+    if (dragPreview?.id === measurement.id) {
+      updateScalar(measurement.id, dragPreview.time, dragPreview.value);
     }
     setDragPreview(null);
   };
 
-  const plotGesture = usePointerGesture({
-    capture: false,
-    threshold: 10,
-    onTap: (e) => handleCreateTap(e.clientX, e.clientY),
-  });
+  const resetPointer = () => {
+    pointerRef.current = { ...EMPTY_POINTER };
+  };
+
+  const onPlotPointerDown = (event: ReactPointerEvent<SVGRectElement>) => {
+    if (event.pointerType === "mouse" && event.button !== 0) return;
+    if (startedAt === null) {
+      message.info("Bitte starten Sie zuerst den Fall.");
+      return;
+    }
+    const mapped = mapPointer(event.clientX, event.clientY);
+    if ("svgX" in mapped) setCrosshair({ ...mapped, locked: true });
+    const rect = svgRef.current?.getBoundingClientRect();
+    const hit = rect
+      ? findNearestHit(
+          { x: event.clientX - rect.left, y: event.clientY - rect.top },
+          hitTargets,
+          event.pointerType,
+        )
+      : null;
+    pointerRef.current = {
+      active: true,
+      pointerId: event.pointerId,
+      pointerType: event.pointerType,
+      startX: event.clientX,
+      startY: event.clientY,
+      moved: false,
+      dragging: false,
+      targetId: hit?.id ?? null,
+    };
+    const target = hit ? measurements.find((measurement) => measurement.id === hit.id) : null;
+    if (target && target.kind !== "nibp") {
+      try { event.currentTarget.setPointerCapture(event.pointerId); } catch { /* no capture */ }
+    }
+  };
+
+  const onPlotPointerMove = (event: ReactPointerEvent<SVGRectElement>) => {
+    const state = pointerRef.current;
+    if (!state.active || state.pointerId !== event.pointerId) {
+      if ((event.pointerType === "mouse" || event.pointerType === "pen") && !draft && !therapyDraft) {
+        const mapped = mapPointer(event.clientX, event.clientY);
+        setCrosshair("svgX" in mapped ? { ...mapped, locked: false } : null);
+      }
+      return;
+    }
+    const distance = Math.hypot(event.clientX - state.startX, event.clientY - state.startY);
+    if (distance > DRAG_THRESHOLD_PX) state.moved = true;
+    const target = state.targetId
+      ? measurements.find((measurement): measurement is ScalarMeasurement =>
+          measurement.id === state.targetId && measurement.kind !== "nibp",
+        )
+      : null;
+    if (target && state.moved) {
+      state.dragging = true;
+      onScalarDragMove(target, event.clientX, event.clientY);
+    }
+  };
+
+  const onPlotPointerUp = (event: ReactPointerEvent<SVGRectElement>) => {
+    const state = pointerRef.current;
+    if (!state.active || state.pointerId !== event.pointerId) return;
+    const target = state.targetId ? measurements.find((measurement) => measurement.id === state.targetId) : null;
+    if (state.dragging && target?.kind !== "nibp" && target) {
+      finishScalarDrag(target);
+    } else if (!state.moved) {
+      if (target) openEdit(target);
+      else {
+        const mapped = mapPointer(event.clientX, event.clientY);
+        if ("svgX" in mapped) openCreate(mapped);
+      }
+    }
+    try { event.currentTarget.releasePointerCapture(event.pointerId); } catch { /* ignore */ }
+    resetPointer();
+  };
+
+  const closeVitalDraft = () => {
+    setDraft(null);
+    setSelectedId(null);
+    setCrosshair(null);
+  };
+  const openTherapyDraft = (next: TherapyDraft) => {
+    setCrosshair(null);
+    setTherapyDraft(next);
+  };
 
   const ctx: BandContext = {
     layout,
@@ -176,118 +316,165 @@ export function VitalTimeline() {
     dragPreview,
     onPointTap: openEdit,
     onScalarDragMove,
-    onScalarDragEnd,
+    onScalarDragEnd: finishScalarDrag,
     onScalarDragCancel: () => setDragPreview(null),
   };
 
   const showData = startedAt !== null;
-  const draftPreviewMarker = renderDraftPreview(draft, xScale, yScales, layout);
+  const defaultActionTime = endedAt ?? nowValue;
 
   return (
-    <div ref={containerRef} className="timeline-surface" data-testid="vital-timeline">
-      {now === null ? (
-        <div style={{ height: layout.height }} />
-      ) : (
-        <svg
-          ref={svgRef}
-          width={width}
-          height={layout.height}
-          viewBox={`0 0 ${width} ${layout.height}`}
-          role="img"
-          aria-label="Vitalparameter-Zeitgrafik"
-          data-testid="vital-timeline-svg"
-          style={{ touchAction: "pan-y", display: "block" }}
-        >
-          {layout.bands.map((band) => (
-            <VitalBandBackground
-              key={band.kind}
-              band={band}
-              layout={layout}
-              yScale={yScales[band.kind]}
-              lastValueText={lastByKind[band.kind]}
-            />
-          ))}
-
-          <TimeGrid layout={layout} xScale={xScale} ticks={ticks} />
-
-          {/* Erstell-Hit-Area (pan-y, damit die Seite gescrollt werden kann). */}
-          <rect
-            x={layout.plotLeft}
-            y={layout.plotTop}
-            width={layout.plotWidth}
-            height={layout.plotBottom - layout.plotTop}
-            fill="transparent"
-            data-testid="timeline-create-area"
-            style={{ touchAction: "pan-y", cursor: startedAt === null ? "not-allowed" : "crosshair" }}
-            {...plotGesture}
-          />
-
-          {showData ? (
-            <>
-              <Spo2Band measurements={scalarsOf("spo2")} ctx={ctx} />
-              <LineBand kind="heartRate" measurements={scalarsOf("heartRate")} ctx={ctx} testId="series-heartRate" />
-              <NibpBand measurements={nibps} ctx={ctx} />
-              <LineBand kind="temperature" measurements={scalarsOf("temperature")} ctx={ctx} testId="series-temperature" />
-              <CurrentTimeIndicator layout={layout} xScale={xScale} startedAt={startedAt} now={nowValue} />
-            </>
-          ) : null}
-
-          {draftPreviewMarker}
-        </svg>
-      )}
-
-      <VitalEntryDrawer
-        draft={draft}
-        onClose={() => {
-          setDraft(null);
-          setSelectedId(null);
+    <>
+      <TherapyToolbar
+        disabled={startedAt === null}
+        onAddMedication={() => openTherapyDraft({ mode: "create-medication", startTime: defaultActionTime })}
+        onAddInfusion={() => openTherapyDraft({ mode: "create-infusion", startTime: defaultActionTime })}
+        onSelectEvent={(eventType) => {
+          const existing = events.find((entry) => entry.eventType === eventType);
+          openTherapyDraft(existing
+            ? { mode: "edit-event", entry: existing }
+            : { mode: "create-event", eventType, time: defaultActionTime });
         }}
       />
-    </div>
+      <div ref={containerRef} className="timeline-surface" data-testid="vital-timeline">
+        {now === null ? <div style={{ height: layout.height }} /> : (
+          <svg
+            ref={svgRef}
+            width={width}
+            height={layout.height}
+            viewBox={`0 0 ${width} ${layout.height}`}
+            role="img"
+            aria-label="Gemeinsame Zeitgrafik für Therapien, Ereignisse und Vitalparameter"
+            data-testid="vital-timeline-svg"
+            style={{ touchAction: "pan-y", display: "block" }}
+          >
+            <TherapyLaneBackgrounds layout={layout} />
+            {layout.bands.map((band) => (
+              <VitalBandBackground key={band.kind} band={band} layout={layout} yScale={yScales[band.kind]} lastValueText={lastByKind[band.kind]} />
+            ))}
+            <TimeGrid layout={layout} xScale={xScale} majorTicks={ticks.major} minorTicks={ticks.minor} />
+            <TherapyDurationLayer layout={layout} xScale={xScale} now={nowValue} endedAt={endedAt} medications={medications} infusions={infusions} />
+
+            {showData ? (
+              <>
+                <Spo2Band measurements={scalarsOf("spo2")} ctx={ctx} />
+                <LineBand kind="heartRate" measurements={scalarsOf("heartRate")} ctx={ctx} testId="series-heartRate" />
+                <NibpBand measurements={nibps} ctx={ctx} />
+                <LineBand kind="temperature" measurements={scalarsOf("temperature")} ctx={ctx} testId="series-temperature" />
+              </>
+            ) : null}
+
+            <rect
+              x={layout.plotLeft}
+              y={layout.plotTop}
+              width={layout.plotWidth}
+              height={layout.plotBottom - layout.plotTop}
+              fill="transparent"
+              data-testid="timeline-create-area"
+              style={{ touchAction: "pan-y", cursor: startedAt === null ? "not-allowed" : "crosshair" }}
+              onPointerDown={onPlotPointerDown}
+              onPointerMove={onPlotPointerMove}
+              onPointerUp={onPlotPointerUp}
+              onPointerCancel={() => {
+                setDragPreview(null);
+                resetPointer();
+              }}
+              onPointerLeave={() => {
+                if (!crosshair?.locked && !draft) setCrosshair(null);
+              }}
+            />
+
+            {showData ? (
+              <>
+                <TherapyMarkerLayer
+                  layout={layout}
+                  xScale={xScale}
+                  medications={medications}
+                  infusions={infusions}
+                  events={events}
+                  minTime={startedAt}
+                  maxTime={maxDocumentableTime(nowValue, endedAt)}
+                  getSvgRect={() => svgRef.current?.getBoundingClientRect() ?? null}
+                  onEditMedication={(entry) => openTherapyDraft({ mode: "edit-medication", entry })}
+                  onEditInfusion={(entry) => openTherapyDraft({ mode: "edit-infusion", entry })}
+                  onEditEvent={(entry) => openTherapyDraft({ mode: "edit-event", entry })}
+                  onCommitEventTime={updateEventTime}
+                />
+                <CurrentTimeIndicator layout={layout} xScale={xScale} startedAt={startedAt} now={nowValue} />
+              </>
+            ) : null}
+            <CrosshairLayer crosshair={crosshair} layout={layout} />
+            {renderDraftPreview(draft, xScale, yScales)}
+          </svg>
+        )}
+      </div>
+      <VitalEntryDrawer draft={draft} onClose={closeVitalDraft} />
+      <TherapyEntryDrawer draft={therapyDraft} onClose={() => setTherapyDraft(null)} />
+    </>
   );
 }
 
-// Sofortige visuelle Vorschau, sobald ein neuer Wert getippt wurde (vor dem Speichern).
+function crosshairForMeasurement(
+  measurement: Measurement,
+  xScale: BandContext["xScale"],
+  yScales: BandContext["yScales"],
+): CrosshairState {
+  const pointerValue = measurement.kind === "nibp" ? measurement.mean : measurement.value;
+  return {
+    ok: true,
+    kind: measurement.kind,
+    time: measurement.time,
+    value: measurement.kind === "nibp" ? null : measurement.value,
+    pointerValue,
+    svgX: timeToX(xScale, measurement.time),
+    svgY: yScales[measurement.kind](pointerValue),
+    locked: true,
+  };
+}
+
+function CrosshairLayer({ crosshair, layout }: { crosshair: CrosshairState | null; layout: BandContext["layout"] }) {
+  if (!crosshair) return null;
+  const config = VITAL_CONFIG[crosshair.kind];
+  const band = layout.bandByKind[crosshair.kind];
+  const nearRight = crosshair.svgX > layout.plotRight - 230;
+  const labelX = nearRight ? crosshair.svgX - 224 : crosshair.svgX + 10;
+  const labelY = clampValue(crosshair.svgY - 42, band.top + 4, band.bottom - 48);
+  const valueLabel = crosshair.kind === "nibp"
+    ? `Zeigerwert ${formatVitalNumber("nibp", crosshair.pointerValue)} ${config.unit}`
+    : `${config.label} ${formatVitalNumber(crosshair.kind, crosshair.pointerValue)} ${config.unit}`;
+  const invalidLabel = !crosshair.ok
+    ? crosshair.reason === "afterEnd"
+      ? "Nicht dokumentierbar · Eingriff beendet"
+      : crosshair.reason === "future"
+        ? "Nicht dokumentierbar · Zukunft"
+        : "Nicht dokumentierbar · vor Beginn"
+    : null;
+  return (
+    <g pointerEvents="none" data-testid="timeline-crosshair">
+      <line x1={crosshair.svgX} y1={layout.contentTop} x2={crosshair.svgX} y2={layout.plotBottom} className="crosshair-vertical" />
+      <line x1={layout.plotLeft} y1={crosshair.svgY} x2={layout.plotRight} y2={crosshair.svgY} className="crosshair-horizontal" />
+      <line x1={crosshair.svgX - 6} y1={crosshair.svgY} x2={crosshair.svgX + 6} y2={crosshair.svgY} className="crosshair-center" />
+      <line x1={crosshair.svgX} y1={crosshair.svgY - 6} x2={crosshair.svgX} y2={crosshair.svgY + 6} className="crosshair-center" />
+      <rect x={labelX} y={labelY} width={214} height={invalidLabel ? 43 : 28} rx={6} className="crosshair-tooltip" />
+      <text x={labelX + 8} y={labelY + 18} className="crosshair-tooltip-text" data-testid="crosshair-coordinate">
+        {formatClock(crosshair.time)} · {valueLabel}
+      </text>
+      {invalidLabel ? <text x={labelX + 8} y={labelY + 35} className="crosshair-tooltip-warning">{invalidLabel}</text> : null}
+    </g>
+  );
+}
+
 function renderDraftPreview(
   draft: EntryDraft | null,
   xScale: BandContext["xScale"],
   yScales: BandContext["yScales"],
-  layout: BandContext["layout"],
 ) {
   if (!draft) return null;
   if (draft.mode === "create-scalar") {
-    const cx = timeToX(xScale, draft.time);
-    const cy = yScales[draft.kind](draft.value);
-    return (
-      <circle
-        cx={cx}
-        cy={cy}
-        r={7}
-        fill="none"
-        stroke="#173029"
-        strokeWidth={2}
-        strokeDasharray="4 3"
-        pointerEvents="none"
-        data-testid="draft-preview"
-      />
-    );
+    return <circle cx={timeToX(xScale, draft.time)} cy={yScales[draft.kind](draft.value)} r={7} fill="none" stroke="#173029" strokeWidth={2} strokeDasharray="4 3" pointerEvents="none" data-testid="draft-preview" />;
   }
   if (draft.mode === "create-nibp") {
-    const cx = timeToX(xScale, draft.time);
-    const band = layout.bandByKind.nibp;
-    return (
-      <line
-        x1={cx}
-        y1={band.innerTop}
-        x2={cx}
-        y2={band.innerBottom}
-        stroke="#173029"
-        strokeWidth={2}
-        strokeDasharray="4 3"
-        pointerEvents="none"
-        data-testid="draft-preview"
-      />
-    );
+    return <circle cx={timeToX(xScale, draft.time)} cy={yScales.nibp(draft.mean)} r={7} fill="none" stroke="#173029" strokeWidth={2} strokeDasharray="4 3" pointerEvents="none" data-testid="draft-preview" />;
   }
   return null;
 }

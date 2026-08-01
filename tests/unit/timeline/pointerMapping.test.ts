@@ -53,12 +53,31 @@ describe("mapPointerToTimeline", () => {
     if (result.ok) {
       expect(result.kind).toBe("nibp");
       expect(result.value).toBeNull();
+      expect(result.pointerValue).toBe(120);
     }
+  });
+
+  it("liefert nach endedAt einen koordinatenhaltigen afterEnd-Fehler", () => {
+    const time = START + 12 * MIN;
+    const svgX = timeToX(xScale, time);
+    const svgY = yScales.spo2(95);
+    const result = mapPointerToTimeline({
+      clientX: svgX,
+      clientY: svgY,
+      rect: { left: 0, top: 0 },
+      layout,
+      xScale,
+      yScales,
+      startedAt: START,
+      now: NOW,
+      endedAt: START + 10 * MIN,
+    });
+    expect(result).toMatchObject({ ok: false, reason: "afterEnd", kind: "spo2", pointerValue: 95 });
   });
 
   it("lehnt Zukunft ab", () => {
     const result = mapAt("spo2", NOW + 5 * MIN, 95);
-    expect(result).toEqual({ ok: false, reason: "future" });
+    expect(result).toMatchObject({ ok: false, reason: "future", kind: "spo2", value: 95 });
   });
 
   it("lehnt Positionen ausserhalb der Plotflaeche ab", () => {

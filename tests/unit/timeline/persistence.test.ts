@@ -9,6 +9,7 @@ const sample: PersistedCase = {
   schemaVersion: CASE_SCHEMA_VERSION,
   caseId: CASE_ID,
   startedAt: START,
+  endedAt: null,
   measurements: [
     { id: "a", kind: "spo2", time: START + 60000, value: 95, createdAt: START, updatedAt: START },
     {
@@ -22,6 +23,9 @@ const sample: PersistedCase = {
       updatedAt: START,
     },
   ],
+  medications: [],
+  infusions: [],
+  events: [],
   lastSavedAt: START + 130000,
 };
 
@@ -56,6 +60,26 @@ describe("casePersistence", () => {
       JSON.stringify({ ...sample, schemaVersion: 999 }),
     );
     expect(loadCase().status).toBe("corrupt");
+  });
+
+  it("migriert schemaVersion 1 ohne Verlust von Start und Messungen", () => {
+    const legacy = {
+      schemaVersion: 1,
+      caseId: CASE_ID,
+      startedAt: START,
+      measurements: sample.measurements,
+      lastSavedAt: START,
+    };
+    const migrated = parseCase(legacy);
+    expect(migrated).toMatchObject({
+      schemaVersion: CASE_SCHEMA_VERSION,
+      startedAt: START,
+      endedAt: null,
+      medications: [],
+      infusions: [],
+      events: [],
+    });
+    expect(migrated?.measurements).toEqual(sample.measurements);
   });
 
   it("parseCase lehnt unvollstaendige Messungen ab", () => {

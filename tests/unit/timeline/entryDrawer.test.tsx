@@ -54,13 +54,13 @@ describe("VitalEntryDrawer", () => {
   it("legt ein NiBP mit drei Werten an", async () => {
     const user = userEvent.setup();
     const time = Date.now();
-    renderDrawer({ mode: "create-nibp", time });
+    renderDrawer({ mode: "create-nibp", time, mean: 90 });
 
     const sys = await screen.findByTestId("entry-systolic");
     await user.click(sys);
     await user.keyboard("120");
-    await user.click(screen.getByTestId("entry-mean"));
-    await user.keyboard("90");
+    await user.clear(screen.getByTestId("entry-mean"));
+    await user.type(screen.getByTestId("entry-mean"), "90");
     await user.click(screen.getByTestId("entry-diastolic"));
     await user.keyboard("70");
     await user.click(screen.getByTestId("entry-save"));

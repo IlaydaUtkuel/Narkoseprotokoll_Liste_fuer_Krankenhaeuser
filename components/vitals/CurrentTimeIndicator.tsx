@@ -25,7 +25,7 @@ export function CurrentTimeIndicator({ layout, xScale, startedAt, now }: Props) 
       {/* C: eine gemeinsame vertikale Linie durch alle Baender */}
       <line
         x1={xNow}
-        y1={layout.plotTop}
+        y1={layout.contentTop}
         x2={xNow}
         y2={traceY}
         stroke="var(--timeline-now-line)"
@@ -57,7 +57,7 @@ export function CurrentTimeIndicator({ layout, xScale, startedAt, now }: Props) 
       {/* D: Jetzt-Etikett (bleibt im Diagramm) */}
       <text
         x={nearRight ? xNow - 8 : xNow + 8}
-        y={layout.plotTop + 11}
+        y={traceY - 8}
         textAnchor={nearRight ? "end" : "start"}
         className="timeline-now-label"
         data-testid="now-label"

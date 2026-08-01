@@ -13,11 +13,30 @@ export interface PointerMapInput {
   yScales: Record<VitalKind, YScale>;
   startedAt: number;
   now: number;
+  endedAt?: number | null;
 }
 
 export type PointerMapResult =
-  | { ok: true; kind: VitalKind; time: number; value: number | null; svgX: number; svgY: number }
-  | { ok: false; reason: "outside" | "future" | "beforeStart" };
+  | {
+      ok: true;
+      kind: VitalKind;
+      time: number;
+      value: number | null;
+      pointerValue: number;
+      svgX: number;
+      svgY: number;
+    }
+  | { ok: false; reason: "outside" }
+  | {
+      ok: false;
+      reason: "future" | "beforeStart" | "afterEnd";
+      kind: VitalKind;
+      time: number;
+      value: number | null;
+      pointerValue: number;
+      svgX: number;
+      svgY: number;
+    };
 
 /**
  * Wandelt eine Pointer-Position in Zeit, Band und (bei skalaren Baendern) Wert um.
@@ -25,7 +44,7 @@ export type PointerMapResult =
  * still auf einen falschen Zeitpunkt geclampt.
  */
 export function mapPointerToTimeline(input: PointerMapInput): PointerMapResult {
-  const { clientX, clientY, rect, layout, xScale, yScales, startedAt, now } = input;
+  const { clientX, clientY, rect, layout, xScale, yScales, startedAt, now, endedAt = null } = input;
   const svgX = clientX - rect.left;
   const svgY = clientY - rect.top;
 
@@ -36,15 +55,19 @@ export function mapPointerToTimeline(input: PointerMapInput): PointerMapResult {
   let time = xToTime(xScale, svgX);
   if (Math.abs(svgX - timeToX(xScale, now)) <= NOW_SNAP_PX) time = now;
 
-  if (time > now) return { ok: false, reason: "future" };
-  if (time < startedAt) return { ok: false, reason: "beforeStart" };
-
-  if (band.kind === "nibp") {
-    return { ok: true, kind: "nibp", time, value: null, svgX, svgY };
-  }
-
   const c = VITAL_CONFIG[band.kind];
   const raw = yScales[band.kind].invert(svgY);
-  const value = roundToPrecision(clampValue(raw, c.min, c.max), c.precision);
-  return { ok: true, kind: band.kind, time, value, svgX, svgY };
+  const pointerValue = roundToPrecision(clampValue(raw, c.min, c.max), c.precision);
+  const mapped = {
+    kind: band.kind,
+    time,
+    value: band.kind === "nibp" ? null : pointerValue,
+    pointerValue,
+    svgX,
+    svgY,
+  };
+  if (time < startedAt) return { ok: false, reason: "beforeStart", ...mapped };
+  if (endedAt !== null && time > endedAt) return { ok: false, reason: "afterEnd", ...mapped };
+  if (time > now) return { ok: false, reason: "future", ...mapped };
+  return { ok: true, ...mapped };
 }

@@ -7,7 +7,8 @@ import { timeToX, type XScale } from "../../lib/timeline/scales";
 interface Props {
   layout: TimelineLayout;
   xScale: XScale;
-  ticks: number[];
+  majorTicks: number[];
+  minorTicks: number[];
 }
 
 const MIN_LABEL_GAP = 44;
@@ -28,23 +29,37 @@ function pickLabeledTicks(ticks: number[], xScale: XScale, plotRight: number): S
 
 // Gemeinsame vertikale 5-Minuten-Rasterlinien durch alle Baender + untere Zeitachse.
 // Bei zu geringem Abstand werden nur Etiketten ausgeduennt – das 5-Minuten-Raster bleibt.
-export function TimeGrid({ layout, xScale, ticks }: Props) {
-  const labeled = pickLabeledTicks(ticks, xScale, layout.plotRight);
+export function TimeGrid({ layout, xScale, majorTicks, minorTicks }: Props) {
+  const labeled = pickLabeledTicks(majorTicks, xScale, layout.plotRight);
 
   return (
     <g pointerEvents="none" data-testid="time-grid">
-      {ticks.map((t) => {
+      {minorTicks.map((t) => {
+        const x = timeToX(xScale, t);
+        return (
+          <line
+            key={t}
+            x1={x}
+            y1={layout.contentTop}
+            x2={x}
+            y2={layout.plotBottom}
+            className="timeline-grid-minor"
+            data-testid="grid-minor"
+          />
+        );
+      })}
+      {majorTicks.map((t) => {
         const x = timeToX(xScale, t);
         const showLabel = labeled.has(t);
         return (
           <g key={t}>
             <line
               x1={x}
-              y1={layout.plotTop}
+              y1={layout.contentTop}
               x2={x}
               y2={layout.plotBottom}
-              stroke="var(--timeline-grid)"
-              strokeWidth={1}
+              className="timeline-grid-major"
+              data-testid="grid-major"
             />
             {showLabel ? (
               <text

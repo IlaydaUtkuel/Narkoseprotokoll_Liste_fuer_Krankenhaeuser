@@ -59,14 +59,25 @@ export function VitalBandBackground({ band, layout, yScale, lastValueText }: Pro
       })}
 
       <text x={8} y={band.top + 16} className="timeline-band-title">
-        {c.label} ({c.unit})
+        {band.kind === "nibp" ? (
+          <>
+            <tspan x={8} dy="0">Nichtinvasiver</tspan>
+            <tspan x={8} dy="15">Blutdruck</tspan>
+            <tspan x={8} dy="15" className="timeline-band-unit">{c.unit}</tspan>
+          </>
+        ) : (
+          <>
+            <tspan x={8}>{c.label}</tspan>
+            <tspan x={8} dy="15" className="timeline-band-unit">{c.unit}</tspan>
+          </>
+        )}
       </text>
 
       {lastValueText ? (
         <text
-          x={layout.plotRight}
-          y={band.top + 16}
-          textAnchor="end"
+          x={8}
+          y={band.bottom - 12}
+          textAnchor="start"
           className="timeline-last-value"
           data-testid={`last-value-${band.kind}`}
         >

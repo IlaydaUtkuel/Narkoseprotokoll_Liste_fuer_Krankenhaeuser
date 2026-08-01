@@ -6,6 +6,9 @@ function pad(n: number): string {
 function deDate(d: Date): string {
   return `${pad(d.getDate())}.${pad(d.getMonth() + 1)}.${d.getFullYear()}`;
 }
+function isoDate(d: Date): string {
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
 function daysFromToday(offset: number): Date {
   const d = new Date();
   d.setDate(d.getDate() + offset);
@@ -37,11 +40,12 @@ test("unvollstaendiges Datum bleibt nach sofortigem Reload erhalten", async ({ p
 test("Kalenderauswahl wird sofort gespeichert und bleibt nach Reload erhalten", async ({ page }) => {
   await page.getByTestId("field-birthDate").getByRole("button", { name: "Kalender öffnen" }).click();
   await expect(page.locator(".ant-picker-dropdown")).toBeVisible();
-  // Tag 15 des aktuellen Monats waehlen (nicht in der Zukunft, gueltig).
-  await page.locator('.ant-picker-dropdown .ant-picker-cell-in-view[title$="-15"]').first().click();
-
   const now = new Date();
-  const expected = deDate(new Date(now.getFullYear(), now.getMonth(), 15));
+  // Den heutigen Tag explizit im aktiven Monat wählen; das bleibt auch am
+  // Monatsanfang innerhalb der Birthdate-Validierung.
+  await page.locator(`.ant-picker-dropdown .ant-picker-cell-in-view[title="${isoDate(now)}"]`).click();
+
+  const expected = deDate(now);
   await expect(page.getByTestId("input-birthDate")).toHaveValue(expected);
 
   await page.reload();

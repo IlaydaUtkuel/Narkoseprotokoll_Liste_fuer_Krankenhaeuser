@@ -8,10 +8,11 @@ import { useEffect, useState } from "react";
  * Intervall. Bei visibilitychange (Tab wieder aktiv) wird sofort neu berechnet,
  * damit die Zeit nach Hintergrund/Vordergrund korrekt ist.
  */
-export function useCurrentTime(intervalMs: number): number | null {
+export function useCurrentTime(intervalMs: number, frozenAt: number | null = null): number | null {
   const [now, setNow] = useState<number | null>(null);
 
   useEffect(() => {
+    if (frozenAt !== null) return;
     const update = () => setNow(Date.now());
     update();
     const id = window.setInterval(update, intervalMs);
@@ -23,7 +24,7 @@ export function useCurrentTime(intervalMs: number): number | null {
       window.clearInterval(id);
       document.removeEventListener("visibilitychange", onVisibility);
     };
-  }, [intervalMs]);
+  }, [frozenAt, intervalMs]);
 
-  return now;
+  return frozenAt ?? now;
 }

@@ -25,7 +25,6 @@ export function NibpBand({ measurements, ctx }: Props) {
         const yDia = yScale(m.diastolic);
         const yMean = yScale(m.mean);
         const selected = ctx.selectedId === m.id;
-        const hitSize = Math.max(44, Math.abs(ySys - yDia) + 18);
         const ariaLabel = `Nichtinvasiver Blutdruck ${m.systolic} zu ${m.diastolic}, Mittel ${m.mean} mmHg um ${formatClock(m.time)} bearbeiten`;
 
         return (
@@ -45,7 +44,6 @@ export function NibpBand({ measurements, ctx }: Props) {
             <MeasurementHit
               cx={cx}
               cy={(ySys + yDia) / 2}
-              size={hitSize}
               ariaLabel={ariaLabel}
               testId={`point-nibp-${m.id}`}
               onTap={() => ctx.onPointTap(m)}

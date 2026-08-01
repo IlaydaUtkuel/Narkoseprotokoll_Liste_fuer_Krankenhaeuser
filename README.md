@@ -6,8 +6,9 @@ zweistufig:
 1. **`/` – Basisdaten des Narkosefalls**: Formular mit acht Feldern, feldweisem
    Autosave, Datumsvalidierung und Offline-Fähigkeit.
 2. **`/dokumentation` – Vitalparameter-Zeitgrafik** (nach „Okay und Weiter“): eine
-   gemeinsame SVG-Zeitgrafik mit vier Baendern (SpO₂, Herzfrequenz, NiBP,
-   Temperatur), Start-/Jetzt-Logik und Eingabe per Maus, Finger und Apple Pencil.
+   gemeinsame SVG-Zeitgrafik mit Therapie-/Ereignis-Lanes und vier Baendern
+   (SpO₂, Herzfrequenz, NiBP, Temperatur), Start-/Ende-/Jetzt-Logik und Eingabe
+   per Maus, Finger und Apple Pencil.
 
 > ⚠️ **Nur fiktive Demodaten.** Es dürfen niemals echte Patientendaten
 > eingegeben oder gespeichert werden.
@@ -33,7 +34,8 @@ professionellen Formular, das
 - **dayjs** für die Datumsfelder
 - **d3-scale** – Zeit↔X- und Wert↔Y-Umrechnung (`scaleTime`, `scaleLinear`)
 - **d3-shape** – SpO₂-Step-Linie/-Flaeche und Linienpfade (`curveStepAfter`, `line`, `area`)
-- **Zustand** – Fall-State (Startzeit, Messungen, Speicherstatus) mit localStorage-Persistenz
+- **Zustand** – Fall-State (Start-/Endzeit, Messungen, Medikamente, Infusionen,
+  Ereignisse und Speicherstatus) mit localStorage-Persistenz
 - **`localStorage`** für Basisdaten und Vitaldaten (kein Backend, keine Datenbank)
 - **Serwist** (`@serwist/next`) für Service Worker / PWA
 - **Vitest** + **Testing Library** (Unit-/Komponententests)
@@ -206,6 +208,52 @@ Der zuletzt gemessene SpO₂-Wert wird als Stufe **bis zur Jetzt-Linie** gehalte
 (nie in die Zukunft), ohne kuenstliche Schwankungen. Neue Werte erzeugen eine
 neue Stufe (`curveStepAfter`).
 
+### Erweiterte Timeline-Interaktion
+
+- `Eingriff beenden` ist vor dem Start deaktiviert und verlangt eine explizite
+  Bestätigung. `endedAt = Date.now()` wird sofort gespeichert. Danach frieren
+  phosphorgrüne Spur, Punkt, gemeinsame Jetzt-Linie und Zeit-Domain ein; der
+  Zustand `Beendet um HH:mm:ss` besitzt eine validierte Korrekturfunktion.
+- Das Grid besteht aus dünnen, unbeschrifteten 1-Minuten-Minor-Linien und
+  stärkeren, beschrifteten 5-Minuten-Major-Linien. Beide sind relativ zum Start
+  und schneiden Therapie-Lanes und Vitalbänder an denselben X-Koordinaten.
+- Ein Crosshair zeigt Zeit, aktiven Parameter, Pointerwert und Einheit. Bei NiBP
+  ist dies nur der **Zeigerwert**; Systole und Diastole werden nie abgeleitet.
+  Crosshair-State ist transient und wird nicht in localStorage geschrieben.
+- Reines Nearest-Point-Hit-Testing nutzt Radien von **12 px (Maus)**,
+  **16 px (Pen)** und **18 px (Touch)**. NiBP prüft nur die vertikale
+  Systole-Diastole-Linie und den Mittelwertpunkt. Ausserhalb der Toleranz öffnet
+  ein neuer Eintrag; grosse 44×44-Overlay-Rechtecke gibt es nicht.
+- Pointer-Zeit und -Wert werden im neuen Vitalformular vorbelegt. Temperatur
+  nutzt eine Nachkommastelle; bei NiBP wird nur `Mittel` vorbelegt. Jedes neue
+  und bestehende Formular besitzt ein editierbares `Zeit`-Feld (`HH:mm:ss`) mit
+  Start-, Zukunfts- und Ende-Validierung.
+
+### Medikamente, Infusionen und Ereignisse
+
+Oberhalb der Vitalbänder liegen drei Teile **desselben SVG und derselben X-Skala**:
+
+- **Medikamente**: Bolus oder kontinuierliche Gabe mit Name, Zeitpunkt,
+  Dosis/Rate, Einheit, optionaler Darstellungsdauer/Endzeit beziehungsweise
+  explizitem laufenden Status.
+- **Infusionen und Flüssigkeiten**: Name, Beginn, Menge/Dosis, Einheit,
+  optionale Dauer/Endzeit und laufender Status.
+- **Phasen und Ereignisse**: Beginn Anästhesie, Schnitt, Naht, Ende Ausleitung
+  und Patient aus dem Saal. Jeder Typ ist pro Fall einmalig; erneute Auswahl
+  öffnet die Bearbeitung.
+
+Medikament-/Infusionsmarker sind editier- und löschbar. Ein ausschließlich vom
+Benutzer angegebener Zeitraum wird niedrig-opak **hinter** den Vitalpfaden
+gezeichnet und bei aktueller Zeit beziehungsweise `endedAt` begrenzt. Ohne
+Dauer/Endzeit entsteht nur ein Marker mit Startlinie. Es wird keine
+pharmakologische Wirkung, Verweildauer oder Behandlungsempfehlung abgeleitet.
+
+Eventmarker besitzen Symbol, Namen und Sekundenzeit. Sie lassen sich per Pointer
+Events mit `setPointerCapture` ausschließlich horizontal verschieben. Während
+des Drags erscheint eine Vorschau; persistiert wird einmal bei `pointerup`.
+Gleichzeitige Marker werden im Lane vertikal getrennt, ihre Zeitlinien behalten
+die exakte gemeinsame X-Position.
+
 ### Farben (zentrale Tokens)
 
 Semantische Farben als CSS-Variablen in `app/globals.css`:
@@ -215,14 +263,21 @@ einzige Information – jedes Band hat Name, Einheit, eigene Form und `aria-labe
 
 ### State & Persistenz (Zustand + localStorage)
 
-`store/anesthesiaCaseStore.ts` haelt Startzeit, Messungen, Speicherstatus und
+`store/anesthesiaCaseStore.ts` haelt Start-/Endzeit, Messungen, Medikamente,
+Infusionen, Ereignisse und Speicherstatus und
 persistiert **sofort** nach jeder abgeschlossenen Aktion unter dem versionierten
 Schlüssel `sikant-anesthesia-demo-case:v1` (`schemaVersion`). Gespeichert werden
-nur echte Zeit-/Messwerte (`{ time, value }`), **niemals Pixelkoordinaten** –
+nur echte Zeit-, Mess-, Dosis-, Einheits- und Dauerwerte, **niemals Pixelkoordinaten** –
 bei Groessenaenderung werden alle Positionen neu berechnet (`ResizeObserver`).
 
-**Recovery nach Reload:** Startzeit, alle Messungen und die SpO₂-Flaeche werden
-wiederhergestellt, der Jetzt-Indikator springt auf die echte aktuelle Zeit.
+Die aktuelle Schema-Version ist **2**. Bestehende Version-1-Fälle werden beim
+Lesen verlustfrei migriert: `startedAt` und Vitalmessungen bleiben erhalten,
+`endedAt` wird `null`, Medikamente/Infusionen/Ereignisse werden leere Arrays.
+Beschädigte oder unbekannte Daten werden nicht still überschrieben.
+
+**Recovery nach Reload:** Start-/Endzeit, Messungen, Therapien, Ereignisse und
+SpO₂-Flaeche werden wiederhergestellt. Ohne `endedAt` springt der Jetzt-Indikator
+auf die echte aktuelle Zeit; mit `endedAt` bleibt er dort stehen.
 Beschaedigte Daten fuehren nicht zum Absturz: es erscheint
 „Gespeicherte Falldaten konnten nicht geladen werden.“ mit der Option
 **„Demofall zurücksetzen“** – beschaedigte Daten werden **nicht** still ueberschrieben.
@@ -233,6 +288,12 @@ Bedienbar mit Maus (Desktop), Finger und Apple Pencil (iPad). Ein echter Apple
 Pencil laesst sich nicht automatisiert testen; die Pointer-Events-Logik ist aber
 fuer `mouse`, `touch` und `pen` gemeinsam implementiert und wird per Playwright
 (Maus + iPad-Viewport) geprueft.
+
+Die Unit-Suite umfasst **91 Tests** unter anderem für Ende/Domain, Migration,
+Hit-Testing, Pointer-Mapping, Zeitvalidierung, Grid-Ticks, Therapiedauern und
+CRUD/Persistenz. Playwright umfasst **42 Läufe** (21 Stories mal
+Desktop-Chromium und iPad-naher Touch-Viewport), einschließlich Ende,
+präzisem Hit-Testing, Zeitbearbeitung, Therapie-CRUD und Event-Drag.
 
 ## Wichtige Hinweise zur Speicherung
 
@@ -293,15 +354,17 @@ Nach erfolgreichem Deployment die ausgegebene HTTPS-URL oben unter
   manuell auf einem realen iPad.
 - Ein echter **Apple Pencil** lässt sich nicht automatisiert testen; die
   Pointer-Events-Logik ist für `mouse`/`touch`/`pen` gemeinsam implementiert.
-- Der **Zeitpunkt** einer Messung wird im Formular nur angezeigt; skalare Werte
-  lassen sich per Ziehen zeitlich/vertikal verschieben, für NiBP ist die Zeit
-  über den Tap-Zeitpunkt festgelegt (Werte per Formular editierbar).
+- Die Zeitfelder bearbeiten `HH:mm:ss` auf dem Kalendertag des Falls; ein über
+  Mitternacht laufender Mehrtageseingriff ist in dieser Demo nicht modelliert.
+- Medikament-/Infusionsnamen und Einheiten sind freie Benutzereingaben. Es gibt
+  bewusst keine Arzneimitteldatenbank, Plausibilitätsprüfung oder medizinische
+  Empfehlung.
 - Das Kalender-Popup der Datumsfelder kann sich am unteren Feldrand minimal
   überlappen (funktional ohne Einschränkung).
 
 ## Nächster geplanter Entwicklungsschritt
 
-Naheliegend sind **Medikamentengaben, Infusionen und OP-Phasen/Ereignisse** auf
-derselben gemeinsamen Zeitachse (Marker/Balken im selben SVG), sowie ein
-**PDF-Export** des dokumentierten Verlaufs. Die Architektur (gemeinsame Skalen,
-reine Timeline-Funktionen, getrenntes Pointer-Handling) ist darauf vorbereitet.
+Naheliegend sind ein **PDF-Export**, optional strukturierte Kataloge ohne
+medizinische Vorschlagslogik und die reale Safari-/Apple-Pencil-Abnahme auf
+Hardware. Die gemeinsame Skala und die persistierten fachlichen Werte sind
+darauf vorbereitet.

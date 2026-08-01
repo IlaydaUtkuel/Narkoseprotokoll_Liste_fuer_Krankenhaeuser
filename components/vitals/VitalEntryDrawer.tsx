@@ -1,8 +1,14 @@
 "use client";
 
-import { App, Button, Drawer, Flex, Form, InputNumber, Popconfirm, Space, Typography } from "antd";
+import { App, Button, Drawer, Flex, Form, InputNumber, Popconfirm, Space, TimePicker } from "antd";
+import dayjs from "dayjs";
+import type { Dayjs } from "dayjs";
 import { VITAL_CONFIG } from "../../lib/timeline/config";
-import { formatClock } from "../../lib/timeline/format";
+import {
+  TIME_ERROR_MESSAGES,
+  timestampFromClockParts,
+  validateTimelineTime,
+} from "../../lib/timeline/timeValidation";
 import { useCaseStore } from "../../store/anesthesiaCaseStore";
 import type { EntryDraft } from "./timelineTypes";
 import type { ScalarKind } from "../../types/vitals";
@@ -23,6 +29,8 @@ export function VitalEntryDrawer({ draft, onClose }: Props) {
   const updateScalar = useCaseStore((s) => s.updateScalar);
   const updateNibp = useCaseStore((s) => s.updateNibp);
   const removeMeasurement = useCaseStore((s) => s.removeMeasurement);
+  const startedAt = useCaseStore((s) => s.startedAt);
+  const endedAt = useCaseStore((s) => s.endedAt);
 
   const open = draft !== null;
   const isNibp = draft?.mode === "create-nibp" || draft?.mode === "edit-nibp";
@@ -51,7 +59,7 @@ export function VitalEntryDrawer({ draft, onClose }: Props) {
     <Drawer
       title={title}
       placement="bottom"
-      height="auto"
+      size="large"
       open={open}
       onClose={onClose}
       destroyOnHidden
@@ -59,20 +67,18 @@ export function VitalEntryDrawer({ draft, onClose }: Props) {
     >
       {draft ? (
         <div style={{ maxWidth: 460, margin: "0 auto" }}>
-          <Typography.Paragraph type="secondary" style={{ marginBottom: 12 }}>
-            Zeit: <span data-testid="entry-time">{formatClock(draft.time)}</span>
-          </Typography.Paragraph>
-
           {!isNibp ? (
             <ScalarForm
               key={draftKey}
               draft={draft as Extract<EntryDraft, { kind: ScalarKind }>}
               onCancel={onClose}
-              onSubmit={(value) => {
+              startedAt={startedAt}
+              endedAt={endedAt}
+              onSubmit={(time, value) => {
                 if (draft.mode === "create-scalar") {
-                  addMeasurement({ kind: draft.kind, time: draft.time, value });
+                  addMeasurement({ kind: draft.kind, time, value });
                 } else if (draft.mode === "edit-scalar") {
-                  updateScalar(draft.id, draft.time, value);
+                  updateScalar(draft.id, time, value);
                 }
                 onClose();
               }}
@@ -84,13 +90,16 @@ export function VitalEntryDrawer({ draft, onClose }: Props) {
               initial={
                 draft.mode === "edit-nibp"
                   ? { systolic: draft.systolic, mean: draft.mean, diastolic: draft.diastolic }
-                  : { systolic: null, mean: null, diastolic: null }
+                  : { systolic: null, mean: draft.mean, diastolic: null }
               }
-              onSubmit={(v) => {
+              time={draft.time}
+              startedAt={startedAt}
+              endedAt={endedAt}
+              onSubmit={(time, v) => {
                 if (draft.mode === "create-nibp") {
-                  addMeasurement({ kind: "nibp", time: draft.time, ...v });
+                  addMeasurement({ kind: "nibp", time, ...v });
                 } else if (draft.mode === "edit-nibp") {
-                  updateNibp(draft.id, draft.time, v.systolic, v.mean, v.diastolic);
+                  updateNibp(draft.id, time, v.systolic, v.mean, v.diastolic);
                 }
                 onClose();
               }}
@@ -123,21 +132,29 @@ function ScalarForm({
   draft,
   onSubmit,
   onCancel,
+  startedAt,
+  endedAt,
 }: {
   draft: Extract<EntryDraft, { kind: ScalarKind }>;
-  onSubmit: (value: number) => void;
+  onSubmit: (time: number, value: number) => void;
   onCancel: () => void;
+  startedAt: number | null;
+  endedAt: number | null;
 }) {
   const c = VITAL_CONFIG[draft.kind];
-  const [form] = Form.useForm<{ value: number }>();
+  const [form] = Form.useForm<{ value: number; time: Dayjs }>();
 
   return (
     <Form
       form={form}
       layout="vertical"
-      initialValues={{ value: draft.value }}
-      onFinish={(values) => onSubmit(values.value)}
+      initialValues={{ value: draft.value, time: dayjs(draft.time) }}
+      onFinish={(values) => {
+        if (startedAt === null) return;
+        onSubmit(clockToTimestamp(startedAt, values.time, draft.time), values.value);
+      }}
     >
+      <TimeField startedAt={startedAt} endedAt={endedAt} originalTime={draft.time} />
       <Form.Item
         label={`${c.label} (${c.unit})`}
         name="value"
@@ -150,7 +167,7 @@ function ScalarForm({
           step={c.step}
           precision={c.precision}
           decimalSeparator={c.precision > 0 ? "," : undefined}
-          addonAfter={c.unit}
+          suffix={c.unit}
           style={{ width: "100%" }}
           autoFocus
         />
@@ -162,39 +179,101 @@ function ScalarForm({
 
 function NibpForm({
   initial,
+  time,
+  startedAt,
+  endedAt,
   onSubmit,
   onCancel,
 }: {
   initial: { systolic: number | null; mean: number | null; diastolic: number | null };
-  onSubmit: (v: { systolic: number; mean: number; diastolic: number }) => void;
+  time: number;
+  startedAt: number | null;
+  endedAt: number | null;
+  onSubmit: (time: number, v: { systolic: number; mean: number; diastolic: number }) => void;
   onCancel: () => void;
 }) {
   const c = VITAL_CONFIG.nibp;
-  const [form] = Form.useForm<{ systolic: number; mean: number; diastolic: number }>();
+  const [form] = Form.useForm<{ systolic: number; mean: number; diastolic: number; time: Dayjs }>();
 
   return (
-    <Form form={form} layout="vertical" initialValues={initial} onFinish={(v) => onSubmit(v)}>
-      <Space direction="horizontal" size={12} style={{ display: "flex" }} wrap>
+    <Form
+      form={form}
+      layout="vertical"
+      initialValues={{ ...initial, time: dayjs(time) }}
+      onFinish={(values) => {
+        if (startedAt === null) return;
+        onSubmit(clockToTimestamp(startedAt, values.time, time), values);
+      }}
+    >
+      <TimeField startedAt={startedAt} endedAt={endedAt} originalTime={time} />
+      <Space orientation="horizontal" size={12} style={{ display: "flex" }} wrap>
         <Form.Item
           label="Systolisch"
           name="systolic"
           rules={[{ required: true, message: "Pflichtfeld" }]}
         >
-          <InputNumber data-testid="entry-systolic" min={c.min} max={c.max} step={1} addonAfter={c.unit} />
+          <InputNumber data-testid="entry-systolic" min={c.min} max={c.max} step={1} suffix={c.unit} />
         </Form.Item>
         <Form.Item label="Mittel" name="mean" rules={[{ required: true, message: "Pflichtfeld" }]}>
-          <InputNumber data-testid="entry-mean" min={c.min} max={c.max} step={1} addonAfter={c.unit} />
+          <InputNumber data-testid="entry-mean" min={c.min} max={c.max} step={1} suffix={c.unit} />
         </Form.Item>
         <Form.Item
           label="Diastolisch"
           name="diastolic"
           rules={[{ required: true, message: "Pflichtfeld" }]}
         >
-          <InputNumber data-testid="entry-diastolic" min={c.min} max={c.max} step={1} addonAfter={c.unit} />
+          <InputNumber data-testid="entry-diastolic" min={c.min} max={c.max} step={1} suffix={c.unit} />
         </Form.Item>
       </Space>
       <FormActions onCancel={onCancel} />
     </Form>
+  );
+}
+
+function clockToTimestamp(startedAt: number, value: Dayjs, originalTime: number): number {
+  const original = new Date(originalTime);
+  if (
+    value.hour() === original.getHours() &&
+    value.minute() === original.getMinutes() &&
+    value.second() === original.getSeconds()
+  ) return originalTime;
+  return timestampFromClockParts(startedAt, value.hour(), value.minute(), value.second());
+}
+
+function TimeField({
+  startedAt,
+  endedAt,
+  originalTime,
+}: {
+  startedAt: number | null;
+  endedAt: number | null;
+  originalTime: number;
+}) {
+  return (
+    <Form.Item
+      label="Zeit"
+      name="time"
+      rules={[
+        { required: true, message: "Bitte eine Zeit wählen." },
+        {
+          validator: (_, value: Dayjs | undefined) => {
+            if (!value || startedAt === null) return Promise.resolve();
+            const timestamp = clockToTimestamp(startedAt, value, originalTime);
+            const error = validateTimelineTime(timestamp, startedAt, Date.now(), endedAt);
+            return error
+              ? Promise.reject(new Error(TIME_ERROR_MESSAGES[error]))
+              : Promise.resolve();
+          },
+        },
+      ]}
+    >
+      <TimePicker
+        format="HH:mm:ss"
+        needConfirm={false}
+        data-testid="entry-time"
+        style={{ width: "100%" }}
+      />
+    </Form.Item>
   );
 }
 

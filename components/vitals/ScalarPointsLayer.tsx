@@ -42,9 +42,6 @@ export function ScalarPointsLayer({ kind, points, ctx }: Props) {
               ariaLabel={ariaLabel}
               testId={`point-${kind}-${m.id}`}
               onTap={() => ctx.onPointTap(m)}
-              onDragMove={(x, y) => ctx.onScalarDragMove(m, x, y)}
-              onDragEnd={() => ctx.onScalarDragEnd(m)}
-              onDragCancel={() => ctx.onScalarDragCancel()}
             >
               <circle
                 cx={cx}

@@ -3,8 +3,17 @@
 import { create } from "zustand";
 import { CASE_ID, CASE_SCHEMA_VERSION } from "../lib/timeline/config";
 import { clearCase, loadCase, saveCase } from "../lib/timeline/casePersistence";
-import { createId } from "../lib/timeline/measurementUtils";
-import type { Measurement, PersistedCase, SaveStatus, ScalarKind } from "../types/vitals";
+import { createId, findNearestSameKind } from "../lib/timeline/measurementUtils";
+import type {
+  InfusionEntry,
+  Measurement,
+  MedicationEntry,
+  PersistedCase,
+  SaveStatus,
+  ScalarKind,
+  TimelineEvent,
+  TimelineEventType,
+} from "../types/vitals";
 
 export interface NewScalar {
   kind: ScalarKind;
@@ -20,16 +29,25 @@ export interface NewNibp {
 }
 export type NewMeasurement = NewScalar | NewNibp;
 
-interface CaseState {
+export type NewMedication = Omit<MedicationEntry, "id" | "kind" | "createdAt" | "updatedAt">;
+export type NewInfusion = Omit<InfusionEntry, "id" | "kind" | "createdAt" | "updatedAt">;
+
+export interface CaseState {
   hydrated: boolean;
   loadError: boolean;
   startedAt: number | null;
+  endedAt: number | null;
   measurements: Measurement[];
+  medications: MedicationEntry[];
+  infusions: InfusionEntry[];
+  events: TimelineEvent[];
   saveStatus: SaveStatus;
   lastSavedAt: number | null;
 
   hydrate: () => void;
   startCase: () => void;
+  endCase: () => void;
+  updateEndedAt: (time: number) => void;
   addMeasurement: (input: NewMeasurement) => Measurement;
   updateScalar: (id: string, time: number, value: number) => void;
   updateNibp: (
@@ -40,6 +58,15 @@ interface CaseState {
     diastolic: number,
   ) => void;
   removeMeasurement: (id: string) => void;
+  addMedication: (input: NewMedication) => MedicationEntry;
+  updateMedication: (id: string, input: NewMedication) => void;
+  removeMedication: (id: string) => void;
+  addInfusion: (input: NewInfusion) => InfusionEntry;
+  updateInfusion: (id: string, input: NewInfusion) => void;
+  removeInfusion: (id: string) => void;
+  upsertEvent: (eventType: TimelineEventType, time: number) => TimelineEvent;
+  updateEventTime: (id: string, time: number) => void;
+  removeEvent: (id: string) => void;
   resetCase: () => void;
 }
 
@@ -53,13 +80,17 @@ type Set = (partial: Partial<CaseState>) => void;
 // Schreibt den aktuellen Fall SOFORT nach localStorage (eine Operation) und steuert
 // die Anzeige "Speichert …" -> "Gespeichert".
 function persist(get: Get, set: Set): void {
-  const { startedAt, measurements } = get();
+  const { startedAt, endedAt, measurements, medications, infusions, events } = get();
   const savedAt = Date.now();
   const payload: PersistedCase = {
     schemaVersion: CASE_SCHEMA_VERSION,
     caseId: CASE_ID,
     startedAt,
+    endedAt,
     measurements,
+    medications,
+    infusions,
+    events,
     lastSavedAt: savedAt,
   };
   try {
@@ -79,7 +110,11 @@ export const useCaseStore = create<CaseState>((set, get) => ({
   hydrated: false,
   loadError: false,
   startedAt: null,
+  endedAt: null,
   measurements: [],
+  medications: [],
+  infusions: [],
+  events: [],
   saveStatus: "idle",
   lastSavedAt: null,
 
@@ -93,14 +128,21 @@ export const useCaseStore = create<CaseState>((set, get) => ({
       set({ hydrated: true, loadError: false });
       return;
     }
-    const { startedAt, measurements, lastSavedAt } = result.data;
+    const { startedAt, endedAt, measurements, medications, infusions, events, lastSavedAt } = result.data;
     set({
       hydrated: true,
       loadError: false,
       startedAt,
+      endedAt,
       measurements,
+      medications,
+      infusions,
+      events,
       lastSavedAt,
-      saveStatus: startedAt !== null || measurements.length > 0 ? "saved" : "idle",
+      saveStatus:
+        startedAt !== null || measurements.length > 0 || medications.length > 0 || infusions.length > 0 || events.length > 0
+          ? "saved"
+          : "idle",
     });
   },
 
@@ -110,8 +152,39 @@ export const useCaseStore = create<CaseState>((set, get) => ({
     persist(get, set);
   },
 
+  endCase: () => {
+    const { startedAt, endedAt } = get();
+    if (startedAt === null || endedAt !== null) return;
+    set({ endedAt: Date.now() });
+    persist(get, set);
+  },
+
+  updateEndedAt: (time) => {
+    if (get().startedAt === null) return;
+    set({ endedAt: time });
+    persist(get, set);
+  },
+
   addMeasurement: (input) => {
     const now = Date.now();
+    const duplicate = findNearestSameKind(get().measurements, input.kind, input.time);
+    if (duplicate) {
+      const measurement: Measurement = input.kind === "nibp" && duplicate.kind === "nibp"
+        ? {
+            ...duplicate,
+            time: input.time,
+            systolic: input.systolic,
+            mean: input.mean,
+            diastolic: input.diastolic,
+            updatedAt: now,
+          }
+        : input.kind !== "nibp" && duplicate.kind !== "nibp"
+          ? { ...duplicate, time: input.time, value: input.value, updatedAt: now }
+          : duplicate;
+      set({ measurements: get().measurements.map((item) => item.id === duplicate.id ? measurement : item) });
+      persist(get, set);
+      return measurement;
+    }
     const measurement: Measurement =
       input.kind === "nibp"
         ? {
@@ -164,12 +237,111 @@ export const useCaseStore = create<CaseState>((set, get) => ({
     persist(get, set);
   },
 
+  addMedication: (input) => {
+    const now = Date.now();
+    const medication: MedicationEntry = {
+      ...input,
+      id: createId(),
+      kind: "medication",
+      createdAt: now,
+      updatedAt: now,
+    };
+    set({ medications: [...get().medications, medication] });
+    persist(get, set);
+    return medication;
+  },
+
+  updateMedication: (id, input) => {
+    const now = Date.now();
+    set({
+      medications: get().medications.map((item) =>
+        item.id === id ? { ...item, ...input, updatedAt: now } : item,
+      ),
+    });
+    persist(get, set);
+  },
+
+  removeMedication: (id) => {
+    set({ medications: get().medications.filter((item) => item.id !== id) });
+    persist(get, set);
+  },
+
+  addInfusion: (input) => {
+    const now = Date.now();
+    const infusion: InfusionEntry = {
+      ...input,
+      id: createId(),
+      kind: "infusion",
+      createdAt: now,
+      updatedAt: now,
+    };
+    set({ infusions: [...get().infusions, infusion] });
+    persist(get, set);
+    return infusion;
+  },
+
+  updateInfusion: (id, input) => {
+    const now = Date.now();
+    set({
+      infusions: get().infusions.map((item) =>
+        item.id === id ? { ...item, ...input, updatedAt: now } : item,
+      ),
+    });
+    persist(get, set);
+  },
+
+  removeInfusion: (id) => {
+    set({ infusions: get().infusions.filter((item) => item.id !== id) });
+    persist(get, set);
+  },
+
+  upsertEvent: (eventType, time) => {
+    const now = Date.now();
+    const existing = get().events.find((item) => item.eventType === eventType);
+    if (existing) {
+      const updated = { ...existing, time, updatedAt: now };
+      set({ events: get().events.map((item) => (item.id === existing.id ? updated : item)) });
+      persist(get, set);
+      return updated;
+    }
+    const event: TimelineEvent = {
+      id: createId(),
+      kind: "event",
+      eventType,
+      time,
+      createdAt: now,
+      updatedAt: now,
+    };
+    set({ events: [...get().events, event] });
+    persist(get, set);
+    return event;
+  },
+
+  updateEventTime: (id, time) => {
+    const now = Date.now();
+    set({
+      events: get().events.map((item) =>
+        item.id === id ? { ...item, time, updatedAt: now } : item,
+      ),
+    });
+    persist(get, set);
+  },
+
+  removeEvent: (id) => {
+    set({ events: get().events.filter((item) => item.id !== id) });
+    persist(get, set);
+  },
+
   resetCase: () => {
     clearCase();
     if (savedTimer) clearTimeout(savedTimer);
     set({
       startedAt: null,
+      endedAt: null,
       measurements: [],
+      medications: [],
+      infusions: [],
+      events: [],
       loadError: false,
       saveStatus: "idle",
       lastSavedAt: null,

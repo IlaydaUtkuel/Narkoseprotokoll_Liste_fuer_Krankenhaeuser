@@ -34,6 +34,15 @@ describe("computeDomain", () => {
     expect(timeToX(early, start)).toBeCloseTo(layout.plotLeft, 5);
     expect(timeToX(late, start)).toBeCloseTo(layout.plotLeft, 5);
   });
+
+  it("friert das Domain-Ende nach endedAt ein", () => {
+    const start = new Date(2026, 6, 31, 19, 0, 0).getTime();
+    const endedAt = start + 12 * MIN;
+    const d1 = computeDomain(start, endedAt + 5 * MIN, undefined, endedAt);
+    const d2 = computeDomain(start, endedAt + 50 * MIN, undefined, endedAt);
+    expect(d1).toEqual(d2);
+    expect(d1.end).toBe(endedAt + 30 * MIN);
+  });
 });
 
 describe("timeToX / xToTime", () => {

@@ -36,21 +36,32 @@ export const VITAL_COLOR_VAR: Record<VitalKind, string> = {
 // Leicht anpassbare Sabitler.
 export const FUTURE_WINDOW_MS = 30 * 60 * 1000; // 30 Minuten Vorschau nach rechts
 export const TICK_INTERVAL_MS = 5 * 60 * 1000; // 5-Minuten-Raster
+export const MINOR_TICK_INTERVAL_MS = 60 * 1000; // 1-Minuten-Raster
 export const NEAR_DUPLICATE_MS = 30 * 1000; // Toleranz: gleicher Punkt statt Duplikat
 export const NOW_SNAP_PX = 6; // Nahe der Jetzt-Linie -> Zeit = jetzt
 
+export const HIT_RADIUS_PX = {
+  mouse: 12,
+  pen: 16,
+  touch: 18,
+} as const;
+
 // Layout-Konstanten des gemeinsamen SVG.
 export const LAYOUT = {
-  marginLeft: 80,
+  marginLeft: 176,
   marginRight: 28,
-  marginTop: 24,
+  marginTop: 16,
   axisHeight: 52,
   bandGap: 10,
-  bandTitleSpace: 24,
+  bandTitleSpace: 12,
   bandPaddingBottom: 12,
+  therapyLaneHeight: 96,
+  eventLaneHeight: 110,
+  therapyLaneGap: 6,
+  therapyGapAfter: 14,
 };
 
 // Persistenz.
 export const CASE_STORAGE_KEY = "sikant-anesthesia-demo-case:v1";
-export const CASE_SCHEMA_VERSION = 1;
+export const CASE_SCHEMA_VERSION = 2;
 export const CASE_ID = "demo-case-001";

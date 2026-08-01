@@ -1,19 +1,13 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { usePointerGesture } from "../../hooks/useTimelinePointer";
 
 interface Props {
   cx: number;
   cy: number;
-  size?: number;
   ariaLabel: string;
   testId?: string;
   onTap: () => void;
-  onDragStart?: (clientX: number, clientY: number) => void;
-  onDragMove?: (clientX: number, clientY: number) => void;
-  onDragEnd?: () => void;
-  onDragCancel?: () => void;
   children: ReactNode;
 }
 
@@ -22,48 +16,32 @@ interface Props {
 export function MeasurementHit({
   cx,
   cy,
-  size = 44,
   ariaLabel,
   testId,
   onTap,
-  onDragStart,
-  onDragMove,
-  onDragEnd,
-  onDragCancel,
   children,
 }: Props) {
-  const gesture = usePointerGesture({
-    capture: true,
-    onTap: () => onTap(),
-    onDragStart: (e) => onDragStart?.(e.clientX, e.clientY),
-    onDragMove: (e) => onDragMove?.(e.clientX, e.clientY),
-    onDragEnd: () => onDragEnd?.(),
-    onCancel: () => onDragCancel?.(),
-  });
-  const half = size / 2;
-
   return (
     <g>
       {children}
       <rect
-        x={cx - half}
-        y={cy - half}
-        width={size}
-        height={size}
+        x={cx - 0.5}
+        y={cy - 0.5}
+        width={1}
+        height={1}
         fill="transparent"
         className="vital-hit"
         data-testid={testId}
         role="button"
         tabIndex={0}
         aria-label={ariaLabel}
-        style={{ touchAction: "none", cursor: "pointer" }}
+        pointerEvents="none"
         onKeyDown={(e) => {
           if (e.key === "Enter" || e.key === " ") {
             e.preventDefault();
             onTap();
           }
         }}
-        {...gesture}
       />
     </g>
   );
