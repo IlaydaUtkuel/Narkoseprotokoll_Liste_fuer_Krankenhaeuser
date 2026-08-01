@@ -80,6 +80,20 @@ export function isCompleteDate(raw: string): boolean {
   return onlyDigits(raw).length === 8;
 }
 
+/** Prueft den Monat getrennt, damit auch importierte Rohwerte streng bleiben. */
+export function validateDateMonth(raw: string): string | null {
+  if (!raw) return null;
+  const parts = raw.split(".");
+  if (parts.length > 3) return TEXT.errorDateMonth;
+  if (parts.length < 2 || parts[1] === "") return null;
+  const month = parts[1];
+  if (!/^\d{1,2}$/.test(month)) return TEXT.errorDateMonth;
+  const numericMonth = Number(month);
+  return Number.isInteger(numericMonth) && numericMonth >= 1 && numericMonth <= 12
+    ? null
+    : TEXT.errorDateMonth;
+}
+
 export function toDeDate(value: Dayjs): string {
   return value.format(DATE_FORMAT);
 }
@@ -100,6 +114,8 @@ export function migrateDateValue(value: unknown): string {
  * Zukunft. Unvollstaendige Eingaben liefern keinen Fehler.
  */
 export function validateBirthDate(raw: string, now: Dayjs = dayjs()): string | null {
+  const monthError = validateDateMonth(raw);
+  if (monthError) return monthError;
   const digits = onlyDigits(raw);
   if (digits.length === 0) return null;
   if (digits.length >= 6) {
@@ -120,6 +136,8 @@ export function validateBirthDate(raw: string, now: Dayjs = dayjs()): string | n
  * Unvollstaendige Eingaben liefern keinen Fehler.
  */
 export function validateOpDate(raw: string, now: Dayjs = dayjs()): string | null {
+  const monthError = validateDateMonth(raw);
+  if (monthError) return monthError;
   const digits = onlyDigits(raw);
   if (digits.length === 0) return null;
   if (digits.length < 8) return TEXT.errorDateIncomplete;

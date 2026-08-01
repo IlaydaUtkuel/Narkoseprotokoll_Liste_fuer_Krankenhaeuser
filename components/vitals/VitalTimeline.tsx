@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { App } from "antd";
 import { BAND_ORDER, VITAL_CONFIG } from "../../lib/timeline/config";
 import { computeTimelineLayout } from "../../lib/timeline/geometry";
@@ -10,6 +10,9 @@ import { relativeTimelineTicks } from "../../lib/timeline/timeTicks";
 import { mapPointerToTimeline, type PointerMapResult } from "../../lib/timeline/pointerMapping";
 import { clampValue, roundToPrecision } from "../../lib/timeline/measurementUtils";
 import { formatClock, formatVitalNumber } from "../../lib/timeline/format";
+import { computeVitalScaleDomains } from "../../lib/timeline/dynamicYScale";
+import { deriveCheckpointWarnings } from "../../lib/timeline/checkpoints";
+import { toggleEventSelection } from "../../lib/timeline/eventSelection";
 import { maxDocumentableTime, type TimelineTimeError } from "../../lib/timeline/timeValidation";
 import { useCurrentTime } from "../../hooks/useCurrentTime";
 import { useElementSize } from "../../hooks/useElementSize";
@@ -20,6 +23,7 @@ import { Spo2Band } from "./Spo2Band";
 import { LineBand } from "./LineBand";
 import { NibpBand, NibpHandleLayer } from "./NibpBand";
 import { CurrentTimeIndicator } from "./CurrentTimeIndicator";
+import { CheckpointWarningLayer } from "./CheckpointWarningLayer";
 import { VitalEntryDrawer } from "./VitalEntryDrawer";
 import { TherapyEntryDrawer } from "./TherapyEntryDrawer";
 import { EventLaneTools } from "./TherapyToolbar";
@@ -100,12 +104,27 @@ export function VitalTimeline() {
   const [selectedEventType, setSelectedEventType] = useState<TimelineEventType | null>(null);
   const [lanePreview, setLanePreview] = useState<LanePlacementPreview | null>(null);
   const [intervalTooltip, setIntervalTooltip] = useState<IntervalTooltipState | null>(null);
+  const [selectedCheckpoint, setSelectedCheckpoint] = useState<number | null>(null);
+
+  useEffect(() => {
+    const clearEventSelection = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      setSelectedEventType(null);
+      setLanePreview(null);
+    };
+    window.addEventListener("keydown", clearEventSelection);
+    return () => window.removeEventListener("keydown", clearEventSelection);
+  }, []);
 
   const width = Math.max(MIN_WIDTH, Math.round(size.width) || MIN_WIDTH);
   const layout = useMemo(() => computeTimelineLayout(width), [width]);
-  const yScales = useMemo(() => buildYScales(layout), [layout]);
   const nowValue = now ?? 0;
   const domain = computeDomain(startedAt, nowValue, undefined, endedAt);
+  const scaleDomains = useMemo(
+    () => computeVitalScaleDomains(measurements, domain.start, domain.end),
+    [measurements, domain.start, domain.end],
+  );
+  const yScales = useMemo(() => buildYScales(layout, scaleDomains), [layout, scaleDomains]);
   const xScale = useMemo(
     () => buildXScale({ start: domain.start, end: domain.end }, layout),
     [domain.start, domain.end, layout],
@@ -113,6 +132,10 @@ export function VitalTimeline() {
   const ticks = useMemo(
     () => relativeTimelineTicks(domain.start, domain.end, layout.plotWidth),
     [domain.start, domain.end, layout.plotWidth],
+  );
+  const checkpointWarnings = useMemo(
+    () => deriveCheckpointWarnings(startedAt, endedAt, nowValue, measurements),
+    [startedAt, endedAt, nowValue, measurements],
   );
 
   const scalarsOf = (kind: VitalKind) =>
@@ -224,6 +247,24 @@ export function VitalTimeline() {
     }
   };
 
+  const openCheckpointBand = (kind: VitalKind, time: number) => {
+    const band = layout.bandByKind[kind];
+    const pointerValue = roundToPrecision(yScales[kind].invert((band.innerTop + band.innerBottom) / 2), VITAL_CONFIG[kind].precision);
+    setSelectedCheckpoint(time);
+    setCrosshair({
+      ok: true,
+      kind,
+      time,
+      value: kind === "nibp" ? null : pointerValue,
+      pointerValue,
+      svgX: timeToX(xScale, time),
+      svgY: yScales[kind](pointerValue),
+      locked: true,
+    });
+    if (kind === "nibp") setDraft({ mode: "create-nibp", time, mean: pointerValue });
+    else setDraft({ mode: "create-scalar", kind, time, value: pointerValue });
+  };
+
   const onScalarDragMove = (measurement: ScalarMeasurement, clientX: number, clientY: number) => {
     if (!svgRef.current || startedAt === null) return;
     const rect = svgRef.current.getBoundingClientRect();
@@ -232,8 +273,9 @@ export function VitalTimeline() {
     const upperTime = maxDocumentableTime(nowValue, endedAt);
     const time = clampValue(xToTime(xScale, svgX), startedAt, upperTime);
     const config = VITAL_CONFIG[measurement.kind];
+    const [domainMin, domainMax] = yScales[measurement.kind].domain();
     const value = roundToPrecision(
-      clampValue(yScales[measurement.kind].invert(svgY), config.min, config.max),
+      clampValue(yScales[measurement.kind].invert(svgY), domainMin, domainMax),
       config.precision,
     );
     setDragPreview({ id: measurement.id, kind: measurement.kind, time, value });
@@ -266,6 +308,7 @@ export function VitalTimeline() {
       message.info("Bitte starten Sie zuerst den Fall.");
       return;
     }
+    setSelectedCheckpoint(null);
     const mapped = mapPointer(event.clientX, event.clientY);
     if ("svgX" in mapped) setCrosshair({ ...mapped, locked: true });
     const rect = svgRef.current?.getBoundingClientRect();
@@ -387,7 +430,7 @@ export function VitalTimeline() {
           >
             <TherapyLaneBackgrounds layout={layout} />
             {layout.bands.map((band) => (
-              <VitalBandBackground key={band.kind} band={band} layout={layout} yScale={yScales[band.kind]} lastValueText={lastByKind[band.kind]} />
+              <VitalBandBackground key={band.kind} band={band} layout={layout} yScale={yScales[band.kind]} scaleDomain={scaleDomains[band.kind]} lastValueText={lastByKind[band.kind]} />
             ))}
             <TimeGrid layout={layout} xScale={xScale} majorTicks={ticks.major} minorTicks={ticks.minor} />
             <TherapyDurationLayer layout={layout} xScale={xScale} now={nowValue} endedAt={endedAt} medications={medications} infusions={infusions} />
@@ -405,7 +448,6 @@ export function VitalTimeline() {
                 onCreateInfusion={(time) => openTherapyDraft({ mode: "create-infusion", startTime: time })}
                 onPlaceEvent={(eventType, time) => {
                   upsertEvent(eventType, time);
-                  setSelectedEventType(null);
                   setLanePreview(null);
                   message.success("Ereignis platziert.");
                 }}
@@ -418,9 +460,7 @@ export function VitalTimeline() {
               disabled={startedAt === null || endedAt !== null}
               selected={selectedEventType}
               onSelect={(eventType) => {
-                // Eine erneute Beruehrung desselben Werkzeugs darf die Auswahl
-                // nicht unbemerkt aufheben (wichtig fuer iPad/Pen-Clickfolgen).
-                setSelectedEventType(eventType);
+                setSelectedEventType((current) => toggleEventSelection(current, eventType));
                 setLanePreview(null);
               }}
             />
@@ -458,6 +498,17 @@ export function VitalTimeline() {
 
             {showData ? (
               <>
+                <CheckpointWarningLayer
+                  warnings={checkpointWarnings}
+                  layout={layout}
+                  xScale={xScale}
+                  selectedTime={selectedCheckpoint}
+                  onSelectTime={(time) => {
+                    setSelectedCheckpoint(time);
+                    setCrosshair(null);
+                  }}
+                  onOpenBand={openCheckpointBand}
+                />
                 <NibpHandleLayer
                   measurements={nibps}
                   ctx={ctx}

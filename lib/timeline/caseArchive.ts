@@ -2,12 +2,15 @@ import { clearPatientData, loadPatientData } from "../patient-storage";
 import { clearCase, loadCase } from "./casePersistence";
 import type { PatientBaseData } from "../../types/patient";
 import type { PersistedCase } from "../../types/vitals";
+import type { CaseExportSnapshot, CaseSaveReceipt } from "./caseExport";
 
 export const CASE_ARCHIVE_STORAGE_KEY = "sikant-anesthesia-demo-archives:v1";
 
 export interface ArchivedCase {
   archiveId: string;
-  folderPath: string;
+  folderPath?: string;
+  fileName?: string;
+  saveMethod?: CaseSaveReceipt["method"];
   archivedAt: string;
   patient: PatientBaseData | null;
   caseData: PersistedCase;
@@ -31,21 +34,22 @@ export function loadCaseArchives(): ArchivedCase[] {
 
 // Schreibt zuerst ein vollstaendiges Archiv. Erst wenn dieser Schreibvorgang
 // erfolgreich war, werden der aktive Fall und die Basisdaten freigegeben.
-export function archiveAndCloseCompletedCase(folderPath: string): ArchivedCase {
-  const normalizedPath = folderPath.trim();
-  if (!normalizedPath) throw new Error("Bitte einen Ordnerpfad eingeben.");
-
+export function archiveAndCloseCompletedCase(
+  snapshot: CaseExportSnapshot,
+  receipt: CaseSaveReceipt,
+): ArchivedCase {
   const loaded = loadCase();
-  if (loaded.status !== "ok" || loaded.data.endedAt === null) {
+  if (loaded.status !== "ok" || loaded.data.endedAt === null || snapshot.endedAt === null) {
     throw new Error("Nur ein beendeter Eingriff kann gespeichert und geschlossen werden.");
   }
 
   const archived: ArchivedCase = {
     archiveId: globalThis.crypto?.randomUUID?.() ?? `archive-${Date.now()}`,
-    folderPath: normalizedPath,
-    archivedAt: new Date().toISOString(),
-    patient: loadPatientData(),
-    caseData: loaded.data,
+    fileName: receipt.fileName,
+    saveMethod: receipt.method,
+    archivedAt: snapshot.archivedAt,
+    patient: snapshot.basisdaten ?? loadPatientData(),
+    caseData: snapshot,
   };
   const previous = loadCaseArchives();
   archiveStorage().setItem(CASE_ARCHIVE_STORAGE_KEY, JSON.stringify([...previous, archived]));

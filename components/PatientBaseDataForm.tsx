@@ -305,7 +305,10 @@ export function PatientBaseDataForm() {
         block
         className={styles.weiterButton}
         data-testid="weiter"
-        onClick={() => router.push("/dokumentation")}
+        onClick={() => {
+          if (birthError || opError) return;
+          router.push("/dokumentation");
+        }}
       >
         {TEXT.weiterButton}
       </Button>

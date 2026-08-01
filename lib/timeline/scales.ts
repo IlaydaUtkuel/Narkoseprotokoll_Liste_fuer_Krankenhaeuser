@@ -2,6 +2,7 @@ import { scaleLinear, scaleTime, type ScaleLinear, type ScaleTime } from "d3-sca
 import { FUTURE_WINDOW_MS, VITAL_CONFIG } from "./config";
 import type { BandLayout, TimelineLayout } from "./geometry";
 import type { VitalKind } from "../../types/vitals";
+import type { VitalScaleDomain } from "./dynamicYScale";
 
 export interface TimelineDomain {
   start: number;
@@ -34,16 +35,19 @@ export function buildXScale(domain: TimelineDomain, layout: TimelineLayout): XSc
     .range([layout.plotLeft, layout.plotRight]);
 }
 
-export function buildYScale(kind: VitalKind, band: BandLayout): YScale {
-  const c = VITAL_CONFIG[kind];
+export function buildYScale(kind: VitalKind, band: BandLayout, domain?: VitalScaleDomain): YScale {
+  const c = domain ?? VITAL_CONFIG[kind];
   // Grosse Werte oben, kleine unten (Range invertiert).
   return scaleLinear().domain([c.min, c.max]).range([band.innerBottom, band.innerTop]);
 }
 
-export function buildYScales(layout: TimelineLayout): Record<VitalKind, YScale> {
+export function buildYScales(
+  layout: TimelineLayout,
+  domains?: Record<VitalKind, VitalScaleDomain>,
+): Record<VitalKind, YScale> {
   const result = {} as Record<VitalKind, YScale>;
   for (const band of layout.bands) {
-    result[band.kind] = buildYScale(band.kind, band);
+    result[band.kind] = buildYScale(band.kind, band, domains?.[band.kind]);
   }
   return result;
 }

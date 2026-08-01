@@ -19,9 +19,10 @@ export function formatHm(ts: number): string {
 
 // Zahl gemaess Parameter-Precision im deutschen Locale (Temperatur mit Komma).
 export function formatVitalNumber(kind: VitalKind, value: number): string {
-  const precision = VITAL_CONFIG[kind].precision;
+  const configured = VITAL_CONFIG[kind].precision;
+  const precision = Number.isInteger(value) ? configured : Math.max(configured, 2);
   return value.toLocaleString("de-DE", {
-    minimumFractionDigits: precision,
+    minimumFractionDigits: configured,
     maximumFractionDigits: precision,
   });
 }

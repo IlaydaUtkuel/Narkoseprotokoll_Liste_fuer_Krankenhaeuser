@@ -7,6 +7,7 @@ import {
 import { loadPatientData, savePatientData } from "@/lib/patient-storage";
 import { loadCase, saveCase } from "@/lib/timeline/casePersistence";
 import { CASE_ID, CASE_SCHEMA_VERSION } from "@/lib/timeline/config";
+import { buildCaseExportSnapshot } from "@/lib/timeline/caseExport";
 
 const START = new Date(2026, 7, 1, 10, 0, 0).getTime();
 
@@ -39,9 +40,13 @@ describe("caseArchive", () => {
       lastSavedAt: START + 30 * 60_000,
     });
 
-    const archived = archiveAndCloseCompletedCase("C:\\Narkoseprotokolle");
+    const loaded = loadCase();
+    if (loaded.status !== "ok") throw new Error("Testfall fehlt");
+    const snapshot = buildCaseExportSnapshot(loaded.data, loadPatientData(), new Date(START + 30 * 60_000).toISOString());
+    const archived = archiveAndCloseCompletedCase(snapshot, { method: "directory", fileName: "Narkosefall_test.json", destinationName: "Narkoseprotokolle" });
 
-    expect(archived.folderPath).toBe("C:\\Narkoseprotokolle");
+    expect(archived.fileName).toBe("Narkosefall_test.json");
+    expect(archived.saveMethod).toBe("directory");
     expect(archived.patient?.patientName).toBe("Testpatient");
     expect(archived.caseData.endedAt).toBe(START + 30 * 60_000);
     expect(loadCaseArchives()).toHaveLength(1);
@@ -63,7 +68,10 @@ describe("caseArchive", () => {
       lastSavedAt: START,
     });
 
-    expect(() => archiveAndCloseCompletedCase("C:\\Narkoseprotokolle")).toThrow(/beendeter Eingriff/);
+    const loaded = loadCase();
+    if (loaded.status !== "ok") throw new Error("Testfall fehlt");
+    const snapshot = buildCaseExportSnapshot(loaded.data, null);
+    expect(() => archiveAndCloseCompletedCase(snapshot, { method: "download", fileName: "test.json" })).toThrow(/beendeter Eingriff/);
     expect(loadCase().status).toBe("ok");
     expect(loadCaseArchives()).toHaveLength(0);
   });

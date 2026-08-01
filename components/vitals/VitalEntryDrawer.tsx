@@ -1,6 +1,6 @@
 "use client";
 
-import { App, Button, Drawer, Flex, Form, InputNumber, Popconfirm, Select, TimePicker } from "antd";
+import { App, AutoComplete, Button, Drawer, Flex, Form, InputNumber, Popconfirm, TimePicker } from "antd";
 import dayjs from "dayjs";
 import type { Dayjs } from "dayjs";
 import { VITAL_CONFIG } from "../../lib/timeline/config";
@@ -144,42 +144,44 @@ function ScalarForm({
   endedAt: number | null;
 }) {
   const c = VITAL_CONFIG[draft.kind];
-  const [form] = Form.useForm<{ value: number; time: Dayjs }>();
+  const [form] = Form.useForm<{ value: number | string; time: Dayjs }>();
 
   return (
     <Form
       form={form}
       layout="vertical"
-      initialValues={{ value: draft.value, time: dayjs(draft.time) }}
+      onKeyDown={(event) => {
+        if (draft.kind === "temperature" && event.key === "Enter") event.preventDefault();
+      }}
+      initialValues={{ value: draft.kind === "temperature" ? String(draft.value) : draft.value, time: dayjs(draft.time) }}
       onFinish={(values) => {
         if (startedAt === null) return;
-        onSubmit(clockToTimestamp(startedAt, values.time, draft.time), values.value);
+        onSubmit(clockToTimestamp(startedAt, values.time, draft.time), Number(String(values.value).replace(",", ".")));
       }}
     >
       <TimeField startedAt={startedAt} endedAt={endedAt} originalTime={draft.time} />
       <Form.Item
         label={`${c.label} (${c.unit})`}
         name="value"
-        rules={[{ required: true, message: "Bitte einen Wert eingeben." }]}
+        rules={[finiteNumberRule("Bitte einen endlichen Zahlenwert eingeben.")]}
       >
         {draft.kind === "temperature" ? (
-          <Select
+          <AutoComplete
             data-testid="entry-value"
             aria-label="Temperatur auswählen"
-            showSearch
-            optionFilterProp="label"
-            options={TEMPERATURE_OPTIONS}
-            popupMatchSelectWidth
+            options={TEMPERATURE_SUGGESTIONS}
+            placeholder="Wert direkt eingeben oder auswählen"
             style={{ width: "100%" }}
             autoFocus
+            onKeyDown={(event) => {
+              if (event.key === "Enter") event.preventDefault();
+            }}
           />
         ) : (
           <InputNumber
             data-testid="entry-value"
-            min={c.min}
-            max={c.max}
             step={c.step}
-            precision={c.precision}
+            controls={false}
             suffix={c.unit}
             style={{ width: "100%" }}
             autoFocus
@@ -210,7 +212,6 @@ function NibpForm({
   onSubmit: (time: number, mean: number, systolic: number | null, diastolic: number | null) => void;
   onCancel: () => void;
 }) {
-  const c = VITAL_CONFIG.nibp;
   const [form] = Form.useForm<{
     mean: number;
     systolic: number | null;
@@ -238,49 +239,21 @@ function NibpForm({
       <Form.Item
         label="Mittel"
         name="mean"
-        dependencies={["systolic", "diastolic"]}
-        rules={[
-          { required: true, message: "Bitte einen Mittelwert eingeben." },
-          ({ getFieldValue }) => ({
-            validator: (_, value: number | null) => {
-              if (value === null || value === undefined) return Promise.resolve();
-              const systolic = getFieldValue("systolic") as number | null;
-              const diastolic = getFieldValue("diastolic") as number | null;
-              if (systolic !== null && systolic !== undefined && value > systolic) {
-                return Promise.reject(new Error("Mittel darf nicht über Systolisch liegen."));
-              }
-              if (diastolic !== null && diastolic !== undefined && value < diastolic) {
-                return Promise.reject(new Error("Mittel darf nicht unter Diastolisch liegen."));
-              }
-              return Promise.resolve();
-            },
-          }),
-        ]}
+        rules={[finiteNumberRule("Bitte einen endlichen Mittelwert eingeben.")]}
       >
-        <InputNumber data-testid="entry-mean" min={c.min} max={c.max} step={1} style={{ width: "100%" }} autoFocus={!focusPart} />
+        <InputNumber data-testid="entry-mean" controls={false} step={1} style={{ width: "100%" }} autoFocus={!focusPart} />
       </Form.Item>
       {editing ? (
         <div className="nibp-endpoint-fields">
           <Form.Item
             label="Systolisch"
             name="systolic"
-            dependencies={["mean"]}
-            rules={[
-              ({ getFieldValue }) => ({
-                validator: (_, value: number | null) => {
-                  if (value === null || value === undefined) return Promise.resolve();
-                  return value >= Number(getFieldValue("mean"))
-                    ? Promise.resolve()
-                    : Promise.reject(new Error("Systolisch muss mindestens dem Mittelwert entsprechen."));
-                },
-              }),
-            ]}
+            rules={[finiteNumberRule("Bitte einen endlichen Zahlenwert eingeben.", true)]}
           >
             <InputNumber
               data-testid="entry-systolic"
-              min={c.min}
-              max={c.max}
               step={1}
+              controls={false}
               suffix="mmHg"
               style={{ width: "100%" }}
               autoFocus={focusPart === "systolic"}
@@ -289,23 +262,12 @@ function NibpForm({
           <Form.Item
             label="Diastolisch"
             name="diastolic"
-            dependencies={["mean"]}
-            rules={[
-              ({ getFieldValue }) => ({
-                validator: (_, value: number | null) => {
-                  if (value === null || value === undefined) return Promise.resolve();
-                  return value <= Number(getFieldValue("mean"))
-                    ? Promise.resolve()
-                    : Promise.reject(new Error("Diastolisch darf den Mittelwert nicht überschreiten."));
-                },
-              }),
-            ]}
+            rules={[finiteNumberRule("Bitte einen endlichen Zahlenwert eingeben.", true)]}
           >
             <InputNumber
               data-testid="entry-diastolic"
-              min={c.min}
-              max={c.max}
               step={1}
+              controls={false}
               suffix="mmHg"
               style={{ width: "100%" }}
               autoFocus={focusPart === "diastolic"}
@@ -323,9 +285,21 @@ function NibpForm({
   );
 }
 
-const TEMPERATURE_OPTIONS = Array.from({ length: 71 }, (_, index) => {
-  const value = Number((34 + index / 10).toFixed(1));
-  return { value, label: `${value.toFixed(1).replace(".", ",")} °C` };
+function finiteNumberRule(message: string, optional = false) {
+  return {
+    validator: (_: unknown, value: unknown) => {
+      if (optional && (value === null || value === undefined || value === "")) return Promise.resolve();
+      const numeric = typeof value === "number" ? value : typeof value === "string" && value.trim() !== "" ? Number(value.replace(",", ".")) : Number.NaN;
+      return Number.isFinite(numeric)
+        ? Promise.resolve()
+        : Promise.reject(new Error(message));
+    },
+  };
+}
+
+const TEMPERATURE_SUGGESTIONS = Array.from({ length: 71 }, (_, index) => {
+  const value = (34 + index / 10).toFixed(1);
+  return { value, label: `${value.replace(".", ",")} °C` };
 });
 
 function clockToTimestamp(startedAt: number, value: Dayjs, originalTime: number): number {

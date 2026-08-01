@@ -8,6 +8,7 @@ import {
   parseDeDate,
   validateBirthDate,
   validateOpDate,
+  validateDateMonth,
 } from "@/lib/date-utils";
 
 function mask(raw: string, opts?: { enforceYearCentury?: boolean; isDeletion?: boolean }) {
@@ -43,6 +44,25 @@ describe("parseDeDate", () => {
     expect(parseDeDate("21.12.2026")?.format("YYYY-MM-DD")).toBe("2026-12-21");
     expect(parseDeDate("21")).toBeNull();
     expect(parseDeDate("32.13.2020")).toBeNull();
+  });
+});
+
+describe("Monatsvalidierung", () => {
+  const error = "Bitte einen Monat zwischen 01 und 12 eingeben.";
+
+  it("akzeptiert fuer OP- und Geburtsdatum ausschliesslich Monate 01 bis 12", () => {
+    for (let month = 1; month <= 12; month += 1) {
+      const value = `01.${String(month).padStart(2, "0")}.2026`;
+      expect(validateDateMonth(value)).toBeNull();
+    }
+  });
+
+  it("weist 00, 13, negative, dezimale und textuelle Monate zurueck", () => {
+    for (const month of ["00", "13", "-1", "1.5", "abc"]) {
+      expect(validateDateMonth(`01.${month}.2026`)).toBe(error);
+    }
+    expect(validateBirthDate("01.13.2020")).toBe(error);
+    expect(validateOpDate("01.00.2026")).toBe(error);
   });
 });
 

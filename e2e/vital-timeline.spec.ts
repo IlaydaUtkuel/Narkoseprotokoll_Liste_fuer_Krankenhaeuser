@@ -75,27 +75,8 @@ async function addNibp(page: Page, sys: number, mean: number, dia: number) {
   await page.getByTestId("entry-save").click();
   await expect(page.getByTestId("entry-mean")).toHaveCount(0);
 
-  const dragHandleToValue = async (part: "systolic" | "diastolic", value: number) => {
-    const position = await page.evaluate(({ partName, targetValue }) => {
-      const hit = document.querySelector(`[data-testid="nibp-handle-${partName}"] > circle[role="button"]`)!;
-      const svg = document.querySelector('[data-testid="vital-timeline-svg"]')!.getBoundingClientRect();
-      const band = document.querySelector('[data-testid="band-nibp"]')!;
-      const hitRect = hit.getBoundingClientRect();
-      const bandY = Number(band.getAttribute("y"));
-      const bandHeight = Number(band.getAttribute("height"));
-      const innerTop = bandY + 12;
-      const innerHeight = bandHeight - 24;
-      const targetY = svg.top + innerTop + ((220 - targetValue) / (220 - 30)) * innerHeight;
-      return { x: hitRect.left + hitRect.width / 2, fromY: hitRect.top + hitRect.height / 2, targetY };
-    }, { partName: part, targetValue: value });
-    await page.mouse.move(position.x, position.fromY);
-    await page.mouse.down();
-    await page.mouse.move(position.x, position.targetY, { steps: 5 });
-    await page.mouse.up();
-  };
-
-  await dragHandleToValue("systolic", sys);
-  await page.getByTestId("nibp-handle-diastolic").locator('circle[role="button"]').click();
+  await page.getByTestId("nibp-handle-systolic").locator('circle[role="button"]').click();
+  await page.getByTestId("entry-systolic").fill(String(sys));
   await page.getByTestId("entry-diastolic").fill(String(dia));
   await page.getByTestId("entry-save").click();
   await expect(page.getByTestId("entry-diastolic")).toHaveCount(0);
@@ -324,23 +305,48 @@ test("Story 4: Eingriff beenden, Zeit einfrieren und Reload", async ({ page }) =
   // Abschluss öffnet eine neue Registerkarte, archiviert zuerst und setzt dann
   // Basisdaten + aktiven Fall für den nächsten Patienten zurück.
   await expect(page.getByTestId("save-close-case")).toBeVisible();
+  await page.context().addInitScript(() => {
+    Object.defineProperty(window, "showDirectoryPicker", {
+      configurable: true,
+      value: async () => ({
+        name: "Narkoseprotokolle",
+        getFileHandle: async (fileName: string) => ({
+          createWritable: async () => ({
+            write: async (file: File) => {
+              (window as typeof window & { __savedCase?: unknown; __savedFileName?: string }).__savedCase = JSON.parse(await file.text());
+              (window as typeof window & { __savedFileName?: string }).__savedFileName = fileName;
+            },
+            close: async () => undefined,
+          }),
+        }),
+      }),
+    });
+  });
   const popupPromise = page.waitForEvent("popup");
   await page.getByTestId("save-close-case").click();
   const closePage = await popupPromise;
   await closePage.waitForLoadState("domcontentloaded");
-  await expect(closePage.getByRole("heading", { name: "Speichern und Schließen" })).toBeVisible();
-  await closePage.getByTestId("archive-folder-path").fill("C:\\Narkoseprotokolle");
-  await closePage.getByTestId("archive-ok").click();
-  await closePage.getByRole("button", { name: "Speichern und Schließen", exact: true }).click();
+  await expect(closePage.getByRole("heading", { name: "Kontrolle" })).toBeVisible();
+  await expect(closePage.getByTestId("case-basis-summary")).toBeVisible();
+  await expect(closePage.getByTestId("case-timeline-preview")).toBeVisible();
+  await closePage.getByTestId("choose-directory").click();
+  await expect(closePage.getByTestId("selected-directory")).toContainText("Narkoseprotokolle");
+  await closePage.getByTestId("archive-confirmation").click();
+  await closePage.getByTestId("archive-save").click();
   await expect(closePage.getByTestId("case-close-complete")).toBeVisible();
   const storageAfterClose = await closePage.evaluate(() => ({
     patient: localStorage.getItem("sikant-anesthesia-demo.patient-base-data.v1"),
     activeCase: localStorage.getItem("sikant-anesthesia-demo-case:v1"),
     archives: JSON.parse(localStorage.getItem("sikant-anesthesia-demo-archives:v1") || "[]").length,
+    savedFileName: (window as typeof window & { __savedFileName?: string }).__savedFileName,
+    savedCase: (window as typeof window & { __savedCase?: { endedAt?: number; measurements?: unknown[] } }).__savedCase,
   }));
   expect(storageAfterClose.patient).toBeNull();
   expect(storageAfterClose.activeCase).toBeNull();
   expect(storageAfterClose.archives).toBe(1);
+  expect(storageAfterClose.savedFileName).toMatch(/^Narkosefall_.*\.json$/);
+  expect(storageAfterClose.savedCase?.endedAt).toBeTruthy();
+  expect(storageAfterClose.savedCase?.measurements).toHaveLength(1);
   await closePage.getByTestId("new-case-start").click();
   await expect(closePage.getByRole("heading", { name: "Basisdaten des Narkosefalls" })).toBeVisible();
   await expect(closePage.getByTestId("input-patientName")).toHaveValue("");
@@ -366,7 +372,7 @@ test("Story 5: präzise Hit-Area und Crosshair auf freier Fläche", async ({ pag
     const svg = document.querySelector('[data-testid="vital-timeline-svg"]')!.getBoundingClientRect();
     const band = document.querySelector('[data-testid="band-spo2"]')!.getBoundingClientRect();
     const xs = circles.map((circle) => Number(circle.getAttribute("cx")));
-    return { x: svg.left + (xs[0] + xs[1]) / 2, y: band.top + band.height / 2 };
+    return { x: svg.left + xs[0] * 0.6 + xs[1] * 0.4, y: band.top + band.height / 2 };
   });
   await page.mouse.move(point.x, point.y);
   await expect(page.getByTestId("timeline-crosshair")).toBeVisible();
@@ -491,7 +497,7 @@ test("Story 9: fünf Phasen, Event-Drag und Entfernen", async ({ page }) => {
   await expect(page.getByTestId("event-incision")).toHaveCount(0);
 });
 
-test("Story 10: kontextuelle Lanes, stabile Ereignisauswahl und große lesbare Ansicht", async ({ page }) => {
+test("Story 10: kontextuelle Lanes, toggle Ereignisauswahl und große lesbare Ansicht", async ({ page }) => {
   await page.goto("/dokumentation");
   await seedStartedCase(page, 20);
 
@@ -509,12 +515,20 @@ test("Story 10: kontextuelle Lanes, stabile Ereignisauswahl und große lesbare A
 
   await page.getByTestId("select-event-incision").click();
   await page.getByTestId("select-event-incision").click();
-  await expect(page.getByTestId("select-event-incision")).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByTestId("select-event-incision")).toHaveAttribute("aria-pressed", "false");
   const eventHover = await page.getByTestId("lane-create-event").boundingBox();
   expect(eventHover).not.toBeNull();
   await page.mouse.move(eventHover!.x + eventHover!.width * 0.2, eventHover!.y + eventHover!.height / 2);
+  await expect(page.getByTestId("lane-placement-preview")).toHaveCount(0);
+  await tapLaneFraction(page, "event", 0.2);
+  await expect(page.getByTestId("event-incision")).toHaveCount(0);
+  await page.getByTestId("select-event-incision").click();
+  await page.mouse.move(eventHover!.x + eventHover!.width * 0.2, eventHover!.y + eventHover!.height / 2);
   await expect(page.getByTestId("lane-placement-preview")).toContainText("Schnitt platzieren");
   await tapLaneFraction(page, "event", 0.2);
+  await expect(page.getByTestId("select-event-incision")).toHaveAttribute("aria-pressed", "true");
+  await page.keyboard.press("Escape");
+  await expect(page.getByTestId("select-event-incision")).toHaveAttribute("aria-pressed", "false");
   await page.getByTestId("event-hit-incision").click();
   const eventPicker = page.getByTestId("event-type").getByRole("combobox");
   await eventPicker.click();
@@ -534,4 +548,103 @@ test("Story 10: kontextuelle Lanes, stabile Ereignisauswahl und große lesbare A
   expect(layout.spo2Height).toBeGreaterThanOrEqual(160);
   expect(layout.nibpHeight).toBeGreaterThanOrEqual(170);
   expect(layout.eventToolsTop).toBeGreaterThanOrEqual(layout.eventLaneTop!);
+});
+
+test("Ereignissymbol toggelt per Maus und iPad-Touch und bleibt nach Platzierung aktiv", async ({ page }, testInfo) => {
+  await page.goto("/dokumentation");
+  await seedStartedCase(page, 20);
+  const tool = page.getByTestId("select-event-incision");
+  const touch = testInfo.project.name === "ipad-viewport";
+  const activate = async () => {
+    if (!touch) return tool.click();
+    const box = await tool.boundingBox();
+    expect(box).not.toBeNull();
+    await page.touchscreen.tap(box!.x + box!.width / 2, box!.y + box!.height / 2);
+  };
+
+  await activate();
+  await expect(tool).toHaveAttribute("aria-pressed", "true");
+  await activate();
+  await expect(tool).toHaveAttribute("aria-pressed", "false");
+  await activate();
+  await expect(tool).toHaveAttribute("aria-pressed", "true");
+
+  const lane = await page.getByTestId("lane-create-event").boundingBox();
+  expect(lane).not.toBeNull();
+  if (touch) await page.touchscreen.tap(lane!.x + lane!.width * 0.2, lane!.y + lane!.height / 2);
+  else await page.mouse.click(lane!.x + lane!.width * 0.2, lane!.y + lane!.height / 2);
+  await expect(page.getByTestId("event-incision")).toBeVisible();
+  await expect(tool).toHaveAttribute("aria-pressed", "true");
+  await activate();
+  await expect(tool).toHaveAttribute("aria-pressed", "false");
+});
+
+test("relative 5-Minuten-Warnung öffnet den exakten Bandwert und verschwindet erst bei vier vollständigen Vitalwerten", async ({ page }) => {
+  await page.goto("/dokumentation");
+  const startedAt = await seedStartedCase(page, 6);
+  const checkpoint = startedAt + 5 * 60_000;
+  const warning = page.getByTestId(`checkpoint-warning-${checkpoint}`);
+  await expect(warning).toBeVisible();
+  await warning.click();
+  await expect(page.getByTestId("checkpoint-selection")).toContainText(/Kontrollzeit/);
+
+  const addAtCheckpoint = async (kind: "spo2" | "heartRate" | "temperature", value: string) => {
+    await page.getByTestId(`checkpoint-band-${kind}-${checkpoint}`).click();
+    await expect(page.getByTestId("entry-time")).toBeVisible();
+    if (kind === "temperature") {
+      const picker = page.getByRole("combobox", { name: "Temperatur auswählen" });
+      await picker.fill(value);
+      await picker.press("Enter");
+    } else {
+      await page.getByTestId("entry-value").fill(value);
+    }
+    await page.getByTestId("entry-save").click();
+    await expect(warning).toBeVisible();
+  };
+
+  await addAtCheckpoint("spo2", "98");
+  await addAtCheckpoint("heartRate", "70");
+  await addAtCheckpoint("temperature", "36,7");
+  await page.getByTestId(`checkpoint-band-nibp-${checkpoint}`).click();
+  await page.getByTestId("entry-mean").fill("90");
+  await page.getByTestId("entry-save").click();
+  await expect(warning).toBeVisible();
+  await page.getByTestId("nibp-handle-systolic").locator('circle[role="button"]').click();
+  await page.getByTestId("entry-systolic").fill("120");
+  await page.getByTestId("entry-diastolic").fill("70");
+  await page.getByTestId("entry-save").click();
+  await expect(warning).toHaveCount(0);
+
+  await tapSelector(page, '[data-testid="points-temperature"] circle');
+  await page.getByTestId("entry-delete").click();
+  await page.locator(".ant-popconfirm").getByRole("button", { name: "Löschen", exact: true }).click();
+  await expect(page.getByTestId(`checkpoint-warning-${checkpoint}`)).toBeVisible();
+  await page.reload();
+  await expect(page.getByTestId(`checkpoint-warning-${checkpoint}`)).toBeVisible();
+});
+
+test("Kontrolle zeigt reale Daten und erstellt ohne Share API eine echte herunterladbare JSON-Datei", async ({ page }) => {
+  const now = Date.now();
+  await page.addInitScript(() => {
+    Reflect.deleteProperty(window, "showDirectoryPicker");
+    Object.defineProperty(navigator, "canShare", { configurable: true, value: () => false });
+    Object.defineProperty(navigator, "share", { configurable: true, value: undefined });
+  });
+  await page.goto("/dokumentation");
+  await page.evaluate(({ now }) => {
+    localStorage.setItem("sikant-anesthesia-demo.patient-base-data.v1", JSON.stringify({ patientName: "Kontrollpatient", birthDate: "01.01.2000", procedure: "Kontroll-OP", operationDate: "01.08.2026", bodyWeightKg: 70, weightUnit: "kg", asaClass: "II", mallampatiClass: "I", allergies: "keine", updatedAt: null }));
+    localStorage.setItem("sikant-anesthesia-demo-case:v1", JSON.stringify({ schemaVersion: 3, caseId: "fall-download", startedAt: now - 10 * 60_000, endedAt: now, measurements: [{ id: "t", kind: "temperature", time: now - 5 * 60_000, value: 45.5, createdAt: now, updatedAt: now }], medications: [], infusions: [], events: [], lastSavedAt: now }));
+  }, { now });
+  await page.goto("/abschluss");
+  await expect(page.getByRole("heading", { name: "Kontrolle" })).toBeVisible();
+  await expect(page.getByTestId("case-basis-summary")).toContainText("Kontrollpatient");
+  await expect(page.getByTestId("preview-series-temperature").locator("circle")).toHaveCount(1);
+  await expect(page.getByTestId("file-delivery-fallback")).toBeVisible();
+  await page.getByTestId("archive-confirmation").click();
+  const downloadPromise = page.waitForEvent("download");
+  await page.getByTestId("archive-save").click();
+  const download = await downloadPromise;
+  expect(download.suggestedFilename()).toMatch(/^Narkosefall_fall-download_.*\.json$/);
+  await expect(page.getByTestId("case-close-complete")).toBeVisible();
+  expect(await page.evaluate(() => localStorage.getItem("sikant-anesthesia-demo-case:v1"))).toBeNull();
 });

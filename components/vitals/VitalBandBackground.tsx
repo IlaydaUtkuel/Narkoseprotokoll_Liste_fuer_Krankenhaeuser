@@ -3,22 +3,21 @@
 import { VITAL_CONFIG } from "../../lib/timeline/config";
 import type { BandLayout, TimelineLayout } from "../../lib/timeline/geometry";
 import type { YScale } from "../../lib/timeline/scales";
+import { formatAxisTick, type VitalScaleDomain } from "../../lib/timeline/dynamicYScale";
 
 interface Props {
   band: BandLayout;
   layout: TimelineLayout;
   yScale: YScale;
   lastValueText?: string | null;
+  scaleDomain: VitalScaleDomain;
 }
 
 // Bandhintergrund: klare Trennung, Y-Achse mit Ticks + horizontalen Gridlines,
 // Titel (Parametername + Einheit) und optional der zuletzt gespeicherte Wert.
-export function VitalBandBackground({ band, layout, yScale, lastValueText }: Props) {
+export function VitalBandBackground({ band, layout, yScale, lastValueText, scaleDomain }: Props) {
   const c = VITAL_CONFIG[band.kind];
-  const ticks: number[] = [];
-  for (let v = c.min; v <= c.max + 1e-9; v += c.yTickStep) {
-    ticks.push(Number(v.toFixed(6)));
-  }
+  const ticks = scaleDomain.ticks;
 
   return (
     <g pointerEvents="none">
@@ -52,7 +51,7 @@ export function VitalBandBackground({ band, layout, yScale, lastValueText }: Pro
               textAnchor="end"
               className="timeline-y-label"
             >
-              {c.precision > 0 ? v.toFixed(c.precision).replace(".", ",") : v}
+              {formatAxisTick(band.kind, v)}
             </text>
           </g>
         );

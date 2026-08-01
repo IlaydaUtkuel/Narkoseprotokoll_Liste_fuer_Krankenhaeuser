@@ -57,7 +57,8 @@ export function mapPointerToTimeline(input: PointerMapInput): PointerMapResult {
 
   const c = VITAL_CONFIG[band.kind];
   const raw = yScales[band.kind].invert(svgY);
-  const pointerValue = roundToPrecision(clampValue(raw, c.min, c.max), c.precision);
+  const [domainMin, domainMax] = yScales[band.kind].domain();
+  const pointerValue = roundToPrecision(clampValue(raw, domainMin, domainMax), c.precision);
   const mapped = {
     kind: band.kind,
     time,

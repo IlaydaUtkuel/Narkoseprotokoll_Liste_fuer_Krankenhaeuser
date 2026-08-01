@@ -120,13 +120,13 @@ function LaneTarget({
         gesture.onPointerMove(event);
         if (event.pointerType === "mouse" || event.pointerType === "pen") {
           const mapped = mapEvent(event);
-          if (mapped) onPreview(mapped);
+          if (mapped) onPreview(kind === "event" && !selectedEvent ? null : mapped);
         }
       }}
       onPointerLeave={() => onPreview(null)}
       onFocus={() => {
         const time = endedAt ?? now;
-        onPreview({ kind, time, x: timeToX(xScale, time), error: null, ...(kind === "event" && selectedEvent ? { eventType: selectedEvent } : {}) });
+        onPreview(kind === "event" && !selectedEvent ? null : { kind, time, x: timeToX(xScale, time), error: null, ...(kind === "event" && selectedEvent ? { eventType: selectedEvent } : {}) });
       }}
       onBlur={() => onPreview(null)}
       onKeyDown={(event) => {
@@ -140,7 +140,7 @@ function LaneTarget({
       }}
       onPointerDown={(event) => {
         const mapped = mapEvent(event);
-        if (mapped) onPreview(mapped);
+        if (mapped) onPreview(kind === "event" && !selectedEvent ? null : mapped);
         gesture.onPointerDown(event);
       }}
       onPointerUp={(event) => {
@@ -156,7 +156,7 @@ function LaneTarget({
 }
 
 function LanePreview({ preview, layout }: { preview: LanePlacementPreview | null; layout: TimelineLayout }) {
-  if (!preview) return null;
+  if (!preview || (preview.kind === "event" && !preview.eventType)) return null;
   const lane = preview.kind === "medication"
     ? layout.therapyLanes[0]
     : preview.kind === "infusion"

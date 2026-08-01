@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, type PointerEvent as ReactPointerEvent } from "react";
-import { VITAL_COLOR_VAR, VITAL_CONFIG } from "../../lib/timeline/config";
+import { VITAL_COLOR_VAR } from "../../lib/timeline/config";
 import { formatClock } from "../../lib/timeline/format";
 import { clampValue, roundToPrecision } from "../../lib/timeline/measurementUtils";
 import { timeToX } from "../../lib/timeline/scales";
@@ -130,8 +130,9 @@ function NibpHandles({
     const rect = owner.ownerSVGElement?.getBoundingClientRect();
     if (!rect) return measurement.mean;
     const raw = yScale.invert(event.clientY - rect.top);
-    const min = part === "systolic" ? measurement.mean : VITAL_CONFIG.nibp.min;
-    const max = part === "systolic" ? VITAL_CONFIG.nibp.max : measurement.mean;
+    const [scaleMin, scaleMax] = yScale.domain();
+    const min = part === "systolic" ? measurement.mean : scaleMin;
+    const max = part === "systolic" ? scaleMax : measurement.mean;
     return roundToPrecision(clampValue(raw, min, max), 0);
   };
 

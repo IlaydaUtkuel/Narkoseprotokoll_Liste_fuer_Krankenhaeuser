@@ -151,27 +151,26 @@ describe("anesthesiaCaseStore", () => {
     });
   });
 
-  it("legt jedes Pflicht-Ereignis nur einmal an und persistiert Drag-Zeit", () => {
+  it("legt denselben Ereignistyp mehrfach an und persistiert Drag-Zeit", () => {
     useCaseStore.getState().startCase();
     const time = useCaseStore.getState().startedAt!;
     const first = useCaseStore.getState().upsertEvent("incision", time);
     const same = useCaseStore.getState().upsertEvent("incision", time + 1000);
-    expect(same.id).toBe(first.id);
-    expect(useCaseStore.getState().events).toHaveLength(1);
+    expect(same.id).not.toBe(first.id);
+    expect(useCaseStore.getState().events).toHaveLength(2);
     useCaseStore.getState().updateEventTime(first.id, time + 2000);
-    expect(loadCase()).toMatchObject({ status: "ok", data: { events: [{ time: time + 2000 }] } });
+    expect(loadCase()).toMatchObject({ status: "ok", data: { events: [expect.objectContaining({ id: first.id, time: time + 2000 }), expect.objectContaining({ id: same.id })] } });
     useCaseStore.getState().removeEvent(first.id);
-    expect(useCaseStore.getState().events).toHaveLength(0);
+    expect(useCaseStore.getState().events).toHaveLength(1);
   });
 
-  it("ändert Ereignistyp und Zeit ohne einen zweiten gleichen Typ zu behalten", () => {
+  it("ändert Ereignistyp und Zeit ohne andere gleichartige Einträge zu löschen", () => {
     useCaseStore.getState().startCase();
     const time = useCaseStore.getState().startedAt!;
     const incision = useCaseStore.getState().upsertEvent("incision", time);
     useCaseStore.getState().upsertEvent("suture", time + 1_000);
     useCaseStore.getState().updateEvent(incision.id, "suture", time + 2_000);
-    expect(useCaseStore.getState().events).toEqual([
-      expect.objectContaining({ id: incision.id, eventType: "suture", time: time + 2_000 }),
-    ]);
+    expect(useCaseStore.getState().events).toHaveLength(2);
+    expect(useCaseStore.getState().events).toContainEqual(expect.objectContaining({ id: incision.id, eventType: "suture", time: time + 2_000 }));
   });
 });

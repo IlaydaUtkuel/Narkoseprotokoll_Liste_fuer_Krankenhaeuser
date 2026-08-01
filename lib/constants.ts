@@ -28,6 +28,7 @@ export const TEXT = {
   weiterButton: "Okay und Weiter",
   // Datumsvalidierung.
   errorDateIncomplete: "Bitte das Datum vollständig eingeben (TT.MM.JJJJ).",
+  errorDateMonth: "Bitte einen Monat zwischen 01 und 12 eingeben.",
   errorBirthYearPrefix: "Das Geburtsjahr muss mit 19 oder 20 beginnen.",
   errorBirthYearRange: "Das Geburtsjahr muss zwischen 1900 und dem aktuellen Jahr liegen.",
   errorBirthFuture: "Das Geburtsdatum darf nicht in der Zukunft liegen.",

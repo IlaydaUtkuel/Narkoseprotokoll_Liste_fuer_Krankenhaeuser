@@ -96,3 +96,13 @@ test("OP-Datum-Validierung (maximal sieben Tage zurueck)", async ({ page }) => {
   await op.fill(deDate(daysFromToday(-8)));
   await expect(error).toHaveText("Das OP-Datum darf höchstens sieben Tage zurückliegen.");
 });
+
+test("ungueltige Monate werden bei OP-Datum und Geburtsdatum mit klarer Meldung blockiert", async ({ page }) => {
+  const message = "Bitte einen Monat zwischen 01 und 12 eingeben.";
+  await page.getByTestId("input-birthDate").fill("01132000");
+  await expect(page.getByTestId("error-birthDate")).toHaveText(message);
+  await page.getByTestId("input-operationDate").fill("01002026");
+  await expect(page.getByTestId("error-operationDate")).toHaveText(message);
+  await page.getByTestId("weiter").click();
+  await expect(page).toHaveURL(/\/$/);
+});

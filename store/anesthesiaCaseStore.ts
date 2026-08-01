@@ -298,13 +298,6 @@ export const useCaseStore = create<CaseState>((set, get) => ({
 
   upsertEvent: (eventType, time) => {
     const now = Date.now();
-    const existing = get().events.find((item) => item.eventType === eventType);
-    if (existing) {
-      const updated = { ...existing, time, updatedAt: now };
-      set({ events: get().events.map((item) => (item.id === existing.id ? updated : item)) });
-      persist(get, set);
-      return updated;
-    }
     const event: TimelineEvent = {
       id: createId(),
       kind: "event",
@@ -331,9 +324,7 @@ export const useCaseStore = create<CaseState>((set, get) => ({
   updateEvent: (id, eventType, time) => {
     const now = Date.now();
     set({
-      events: get().events
-        .filter((item) => item.id === id || item.eventType !== eventType)
-        .map((item) => item.id === id ? { ...item, eventType, time, updatedAt: now } : item),
+      events: get().events.map((item) => item.id === id ? { ...item, eventType, time, updatedAt: now } : item),
     });
     persist(get, set);
   },
