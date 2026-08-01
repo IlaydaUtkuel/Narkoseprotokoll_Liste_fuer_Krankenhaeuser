@@ -9,6 +9,11 @@ describe("Therapie-Darstellungsdauer", () => {
       .toBe(START + 20 * 60_000);
   });
 
+  it("zeigt eine explizit eingegebene Dauer vollständig, auch wenn ihr Ende nach currentTime liegt", () => {
+    const entry = { startTime: START, durationMinutes: 20, endTime: null, ongoing: false };
+    expect(displayEndTime(entry, START + 1_000, null)).toBe(START + 20 * 60_000);
+  });
+
   it("erzeugt ohne Dauer oder Endzeit keinen Bolus-Hintergrund", () => {
     expect(displayEndTime({ startTime: START, durationMinutes: null, endTime: null, ongoing: false }, START + 60_000, null))
       .toBeNull();

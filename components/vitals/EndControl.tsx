@@ -30,6 +30,15 @@ export function EndControl() {
             Bearbeiten
           </Button>
         </Flex>
+        <Button
+          type="primary"
+          href="/abschluss"
+          target="_blank"
+          rel="noopener noreferrer"
+          data-testid="save-close-case"
+        >
+          Speichern und Schließen
+        </Button>
         <Modal
           title="Endzeit bearbeiten"
           open={editing}

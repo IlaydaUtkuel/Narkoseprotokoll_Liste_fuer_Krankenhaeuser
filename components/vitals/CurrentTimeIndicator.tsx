@@ -17,7 +17,7 @@ interface Props {
 export function CurrentTimeIndicator({ layout, xScale, startedAt, now }: Props) {
   const xStart = timeToX(xScale, startedAt);
   const xNow = timeToX(xScale, now);
-  const traceY = layout.plotBottom + 16;
+  const traceY = layout.plotBottom + 39;
   const nearRight = xNow > layout.plotRight - 96;
 
   return (

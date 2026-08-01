@@ -12,7 +12,7 @@ import {
 import { DatePicker, Input } from "antd";
 import type { GetRef, InputRef } from "antd";
 import { CalendarOutlined } from "@ant-design/icons";
-import type { Dayjs } from "dayjs";
+import dayjs, { type Dayjs } from "dayjs";
 import { DATE_PLACEHOLDER } from "../lib/constants";
 import { applyDateMask, parseDeDate, toDeDate } from "../lib/date-utils";
 import styles from "./DateField.module.css";
@@ -27,6 +27,7 @@ interface Props {
   disabledDate?: (current: Dayjs) => boolean;
   ariaInvalid?: boolean;
   testId?: string;
+  showTodayShortcut?: boolean;
 }
 
 /**
@@ -42,6 +43,7 @@ export function DateField({
   disabledDate,
   ariaInvalid,
   testId,
+  showTodayShortcut = false,
 }: Props) {
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -120,6 +122,7 @@ export function DateField({
         open={open}
         onOpenChange={setOpen}
         value={parseDeDate(value)}
+        defaultPickerValue={showTodayShortcut ? dayjs() : undefined}
         onChange={handlePick}
         // Nur das Datum weiterreichen – rc-picker uebergibt einen zweiten Info-Parameter,
         // der sonst faelschlich als "now" der Helfer interpretiert wuerde.

@@ -51,22 +51,64 @@ describe("VitalEntryDrawer", () => {
     expect(onClose).toHaveBeenCalled();
   });
 
-  it("legt ein NiBP mit drei Werten an", async () => {
+  it("legt ein NiBP zuerst nur mit dem Mittelwert an", async () => {
     const user = userEvent.setup();
     const time = Date.now();
     renderDrawer({ mode: "create-nibp", time, mean: 90 });
 
-    const sys = await screen.findByTestId("entry-systolic");
-    await user.click(sys);
-    await user.keyboard("120");
-    await user.clear(screen.getByTestId("entry-mean"));
+    const mean = await screen.findByTestId("entry-mean");
+    expect(screen.queryByTestId("entry-systolic")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("entry-diastolic")).not.toBeInTheDocument();
+    await user.clear(mean);
     await user.type(screen.getByTestId("entry-mean"), "90");
-    await user.click(screen.getByTestId("entry-diastolic"));
-    await user.keyboard("70");
     await user.click(screen.getByTestId("entry-save"));
 
     const measurements = useCaseStore.getState().measurements;
     expect(measurements).toHaveLength(1);
-    expect(measurements[0]).toMatchObject({ kind: "nibp", systolic: 120, mean: 90, diastolic: 70 });
+    expect(measurements[0]).toMatchObject({ kind: "nibp", systolic: null, mean: 90, diastolic: null });
+  });
+
+  it("erlaubt Systolisch und Diastolisch im Bearbeitungsformular direkt einzugeben", async () => {
+    const user = userEvent.setup();
+    const time = Date.now();
+    useCaseStore.setState({
+      measurements: [{
+        id: "nibp-edit",
+        kind: "nibp",
+        time,
+        systolic: null,
+        mean: 90,
+        diastolic: null,
+        createdAt: time,
+        updatedAt: time,
+      }],
+    });
+    renderDrawer({
+      mode: "edit-nibp",
+      id: "nibp-edit",
+      time,
+      systolic: null,
+      mean: 90,
+      diastolic: null,
+      focusPart: "systolic",
+    });
+
+    await user.type(await screen.findByTestId("entry-systolic"), "130");
+    await user.type(screen.getByTestId("entry-diastolic"), "70");
+    await user.click(screen.getByTestId("entry-save"));
+
+    expect(useCaseStore.getState().measurements[0]).toMatchObject({
+      kind: "nibp",
+      systolic: 130,
+      mean: 90,
+      diastolic: 70,
+    });
+  });
+
+  it("zeigt Temperatur als direkt auswählbaren Picker ohne Spinbutton", async () => {
+    renderDrawer({ mode: "create-scalar", kind: "temperature", time: Date.now(), value: 36.7 });
+    const picker = await screen.findByRole("combobox", { name: "Temperatur auswählen" });
+    expect(picker).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByRole("spinbutton", { name: /Temperatur/ })).not.toBeInTheDocument();
   });
 });

@@ -4,7 +4,8 @@ Webanwendung zur Dokumentation eines **fiktiven Narkosefalls**. Der Ablauf ist
 zweistufig:
 
 1. **`/` – Basisdaten des Narkosefalls**: Formular mit acht Feldern, feldweisem
-   Autosave, Datumsvalidierung und Offline-Fähigkeit.
+   Autosave, Datumsvalidierung und Offline-Fähigkeit. Das leere OP-Datum öffnet
+   den Kalender beim heutigen Tag und bietet die Direktwahl `Heute`.
 2. **`/dokumentation` – Vitalparameter-Zeitgrafik** (nach „Okay und Weiter“): eine
    gemeinsame SVG-Zeitgrafik mit Therapie-/Ereignis-Lanes und vier Baendern
    (SpO₂, Herzfrequenz, NiBP, Temperatur), Start-/Ende-/Jetzt-Logik und Eingabe
@@ -214,9 +215,10 @@ neue Stufe (`curveStepAfter`).
   Bestätigung. `endedAt = Date.now()` wird sofort gespeichert. Danach frieren
   phosphorgrüne Spur, Punkt, gemeinsame Jetzt-Linie und Zeit-Domain ein; der
   Zustand `Beendet um HH:mm:ss` besitzt eine validierte Korrekturfunktion.
-- Das Grid besteht aus dünnen, unbeschrifteten 1-Minuten-Minor-Linien und
-  stärkeren, beschrifteten 5-Minuten-Major-Linien. Beide sind relativ zum Start
-  und schneiden Therapie-Lanes und Vitalbänder an denselben X-Koordinaten.
+- Kurze Fälle verwenden dünne 1-Minuten-Minor- und stärkere beschriftete
+  5-Minuten-Major-Linien. Bei langen Eingriffen werden Linien und Beschriftungen
+  anhand der verfügbaren Pixelbreite adaptiv ausgedünnt, damit Messwerte und
+  Texte lesbar bleiben.
 - Ein Crosshair zeigt Zeit, aktiven Parameter, Pointerwert und Einheit. Bei NiBP
   ist dies nur der **Zeigerwert**; Systole und Diastole werden nie abgeleitet.
   Crosshair-State ist transient und wird nicht in localStorage geschrieben.
@@ -225,9 +227,16 @@ neue Stufe (`curveStepAfter`).
   Systole-Diastole-Linie und den Mittelwertpunkt. Ausserhalb der Toleranz öffnet
   ein neuer Eintrag; grosse 44×44-Overlay-Rechtecke gibt es nicht.
 - Pointer-Zeit und -Wert werden im neuen Vitalformular vorbelegt. Temperatur
-  nutzt eine Nachkommastelle; bei NiBP wird nur `Mittel` vorbelegt. Jedes neue
+  nutzt einen such- und direkt auswählbaren 0,1-°C-Picker statt Spinbuttons; bei
+  NiBP wird nur `Mittel` vorbelegt. Jedes neue
   und bestehende Formular besitzt ein editierbares `Zeit`-Feld (`HH:mm:ss`) mit
   Start-, Zukunfts- und Ende-Validierung.
+- NiBP wird zweistufig erfasst: zuerst Zeit und `Mittel`, anschließend werden
+  die kleinen oberen/unteren SVG-Griffe für `Systolisch` und `Diastolisch`
+  direkt gezogen. Ein kurzer Klick/Tap auf einen weißen Griff öffnet zusätzlich
+  die direkte Zahleneingabe für Systolisch und Diastolisch. Während Hover, Pen-
+  oder Touch-Interaktion zeigt ein kompakter Tooltip alle drei Zahlen und genau
+  eine feste Einheit `mmHg`.
 
 ### Medikamente, Infusionen und Ereignisse
 
@@ -243,10 +252,27 @@ Oberhalb der Vitalbänder liegen drei Teile **desselben SVG und derselben X-Skal
   öffnet die Bearbeitung.
 
 Medikament-/Infusionsmarker sind editier- und löschbar. Ein ausschließlich vom
-Benutzer angegebener Zeitraum wird niedrig-opak **hinter** den Vitalpfaden
-gezeichnet und bei aktueller Zeit beziehungsweise `endedAt` begrenzt. Ohne
-Dauer/Endzeit entsteht nur ein Marker mit Startlinie. Es wird keine
+Benutzer angegebener Zeitraum wird ohne Flächenfärbung als diagonale
+**Hatch-Linien innerhalb jedes Vitalbands** gezeichnet. Farbe, Richtung,
+Strichstärke, Abstand und Strichstil unterscheiden parallele Einträge; Hover,
+Pen und Touch zeigen Name, Typ sowie Start-/Endzeit. Explizite Dauer/Endzeit
+wird vollständig angezeigt, laufende Gaben enden am aktuellen Zeitpunkt bzw.
+`endedAt`. Ohne Dauer/Endzeit entsteht nur ein Marker mit Startlinie. Es wird keine
 pharmakologische Wirkung, Verweildauer oder Behandlungsempfehlung abgeleitet.
+
+Allgemeine Hinzufügen-Buttons gibt es nicht mehr: Ein Klick in die
+Medikamenten- beziehungsweise Infusions-Lane übernimmt exakt die angezeigte
+Zeit in das Formular. Die fünf Ereigniswerkzeuge liegen im linken Gutter der
+Lane `Phasen und Ereignisse`; nach der Auswahl zeigt die Lane Symbol- und
+Sekundenzeit-Preview und platziert das Ereignis beim Klick. Im Edit-Drawer sind
+Ereignistyp/-name und Zeit änderbar. Eine erneute Berührung desselben Symbols
+hebt die Auswahl nicht auf; sie bleibt bis zur Platzierung stabil.
+
+Nach `Eingriff beenden` erscheint **Speichern und Schließen**. Die Aktion
+öffnet eine eigene Registerkarte, fragt nach Bestätigung und `Ordnerpfad`, legt
+ein vollständiges lokales Archiv an und leert erst danach aktive Fall- und
+Patientendaten. **Neuen Fall starten** führt zu leeren Basisdaten; nach
+`Okay und Weiter` steht wieder der reguläre Start-Button bereit.
 
 Eventmarker besitzen Symbol, Namen und Sekundenzeit. Sie lassen sich per Pointer
 Events mit `setPointerCapture` ausschließlich horizontal verschieben. Während
@@ -270,9 +296,12 @@ Schlüssel `sikant-anesthesia-demo-case:v1` (`schemaVersion`). Gespeichert werde
 nur echte Zeit-, Mess-, Dosis-, Einheits- und Dauerwerte, **niemals Pixelkoordinaten** –
 bei Groessenaenderung werden alle Positionen neu berechnet (`ResizeObserver`).
 
-Die aktuelle Schema-Version ist **2**. Bestehende Version-1-Fälle werden beim
-Lesen verlustfrei migriert: `startedAt` und Vitalmessungen bleiben erhalten,
-`endedAt` wird `null`, Medikamente/Infusionen/Ereignisse werden leere Arrays.
+Die aktuelle Schema-Version ist **3**. Bestehende Version-1- und Version-2-Fälle
+werden beim Lesen verlustfrei migriert. Version 3 erlaubt bei einer neuen
+NiBP-Messung zunächst offene (`null`) Systole-/Diastole-Griffe; vorhandene
+vollständige Blutdruckwerte bleiben unverändert. Bei Version 1 bleiben
+`startedAt` und Vitalmessungen erhalten, `endedAt` wird `null` und
+Medikamente/Infusionen/Ereignisse werden leere Arrays.
 Beschädigte oder unbekannte Daten werden nicht still überschrieben.
 
 **Recovery nach Reload:** Start-/Endzeit, Messungen, Therapien, Ereignisse und
@@ -289,17 +318,22 @@ Pencil laesst sich nicht automatisiert testen; die Pointer-Events-Logik ist aber
 fuer `mouse`, `touch` und `pen` gemeinsam implementiert und wird per Playwright
 (Maus + iPad-Viewport) geprueft.
 
-Die Unit-Suite umfasst **91 Tests** unter anderem für Ende/Domain, Migration,
+Die Unit-Suite umfasst **103 Tests** unter anderem für Ende/Domain, Migration,
 Hit-Testing, Pointer-Mapping, Zeitvalidierung, Grid-Ticks, Therapiedauern und
-CRUD/Persistenz. Playwright umfasst **42 Läufe** (21 Stories mal
+CRUD/Persistenz. Playwright umfasst **46 Läufe** (23 Szenarien mal
 Desktop-Chromium und iPad-naher Touch-Viewport), einschließlich Ende,
-präzisem Hit-Testing, Zeitbearbeitung, Therapie-CRUD und Event-Drag.
+präzisem Hit-Testing, Zeitbearbeitung, NIBP-Griffen, kontextuellen Lanes,
+Hatch-Tooltips, Therapie-CRUD, Event-Drag, Fallabschluss und der wieder
+großzügig lesbaren Timeline.
 
 ## Wichtige Hinweise zur Speicherung
 
 - Die Speicherung gilt **nur** für **denselben Browser, dasselbe Gerät und
   dieselbe Domain**. Es werden **keine** Daten an einen Server oder an andere
   Geräte übertragen.
+- Der beim Abschluss eingegebene `Ordnerpfad` ist in der Browser-Demo eine
+  Ablagebezeichnung des lokalen Archivs; Webbrowser dürfen aus Sicherheitsgründen
+  nicht allein anhand eines Textpfads beliebige Betriebssystemordner beschreiben.
 - **Privates Surfen** (Inkognito) oder das **manuelle Löschen der Browserdaten**
   hebt die Speicherung auf.
 - Es dürfen **ausschließlich fiktive Daten** verwendet werden.

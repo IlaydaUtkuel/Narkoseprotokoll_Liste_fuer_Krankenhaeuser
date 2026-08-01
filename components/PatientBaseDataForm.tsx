@@ -219,6 +219,7 @@ export function PatientBaseDataForm() {
             onChange={(raw) => handleChange("operationDate", raw)}
             disabledDate={isOpDateDisabled}
             ariaInvalid={Boolean(opError)}
+            showTodayShortcut
           />
         </Field>
 

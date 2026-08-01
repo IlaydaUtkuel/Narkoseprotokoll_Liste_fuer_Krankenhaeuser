@@ -34,16 +34,17 @@ function parseMeasurement(raw: unknown): Measurement | null {
     return { id: o.id, kind: o.kind, time: o.time, value: o.value, createdAt, updatedAt };
   }
   if (o.kind === "nibp") {
-    if (!isFiniteNumber(o.systolic) || !isFiniteNumber(o.mean) || !isFiniteNumber(o.diastolic)) {
-      return null;
-    }
+    if (!isFiniteNumber(o.mean)) return null;
+    const systolic = nullableFiniteNumber(o.systolic);
+    const diastolic = nullableFiniteNumber(o.diastolic);
+    if (systolic === undefined || diastolic === undefined) return null;
     return {
       id: o.id,
       kind: "nibp",
       time: o.time,
-      systolic: o.systolic,
+      systolic,
       mean: o.mean,
-      diastolic: o.diastolic,
+      diastolic,
       createdAt,
       updatedAt,
     };
@@ -154,7 +155,7 @@ function parseArray<T>(raw: unknown, parser: (item: unknown) => T | null): T[] |
 export function parseCase(raw: unknown): PersistedCase | null {
   if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return null;
   const o = raw as Record<string, unknown>;
-  if (o.schemaVersion !== 1 && o.schemaVersion !== CASE_SCHEMA_VERSION) return null;
+  if (o.schemaVersion !== 1 && o.schemaVersion !== 2 && o.schemaVersion !== CASE_SCHEMA_VERSION) return null;
   if (!Array.isArray(o.measurements)) return null;
 
   const measurements: Measurement[] = [];

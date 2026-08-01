@@ -10,7 +10,7 @@ import { relativeTimelineTicks } from "../../lib/timeline/timeTicks";
 import { mapPointerToTimeline, type PointerMapResult } from "../../lib/timeline/pointerMapping";
 import { clampValue, roundToPrecision } from "../../lib/timeline/measurementUtils";
 import { formatClock, formatVitalNumber } from "../../lib/timeline/format";
-import { maxDocumentableTime } from "../../lib/timeline/timeValidation";
+import { maxDocumentableTime, type TimelineTimeError } from "../../lib/timeline/timeValidation";
 import { useCurrentTime } from "../../hooks/useCurrentTime";
 import { useElementSize } from "../../hooks/useElementSize";
 import { useCaseStore } from "../../store/anesthesiaCaseStore";
@@ -18,18 +18,25 @@ import { TimeGrid } from "./TimeGrid";
 import { VitalBandBackground } from "./VitalBandBackground";
 import { Spo2Band } from "./Spo2Band";
 import { LineBand } from "./LineBand";
-import { NibpBand } from "./NibpBand";
+import { NibpBand, NibpHandleLayer } from "./NibpBand";
 import { CurrentTimeIndicator } from "./CurrentTimeIndicator";
 import { VitalEntryDrawer } from "./VitalEntryDrawer";
 import { TherapyEntryDrawer } from "./TherapyEntryDrawer";
-import { TherapyToolbar } from "./TherapyToolbar";
+import { EventLaneTools } from "./TherapyToolbar";
 import {
+  TherapyIntervalTooltip,
   TherapyDurationLayer,
   TherapyLaneBackgrounds,
   TherapyMarkerLayer,
+  therapyIntervalsAtTime,
+  type ActiveTherapyInterval,
 } from "./TherapyLayers";
+import {
+  TherapyLaneInteractionLayer,
+  type LanePlacementPreview,
+} from "./TherapyLaneInteractions";
 import type { BandContext, DragPreview, EntryDraft, TherapyDraft } from "./timelineTypes";
-import type { Measurement, NibpMeasurement, ScalarMeasurement, VitalKind } from "../../types/vitals";
+import type { Measurement, NibpMeasurement, ScalarMeasurement, TimelineEventType, VitalKind } from "../../types/vitals";
 
 const MIN_WIDTH = 320;
 const NOW_INTERVAL_MS = 250;
@@ -47,6 +54,13 @@ interface PlotPointerState {
   moved: boolean;
   dragging: boolean;
   targetId: string | null;
+}
+
+interface IntervalTooltipState {
+  items: ActiveTherapyInterval[];
+  x: number;
+  y: number;
+  locked: boolean;
 }
 
 const EMPTY_POINTER: PlotPointerState = {
@@ -73,7 +87,9 @@ export function VitalTimeline() {
   const infusions = useCaseStore((state) => state.infusions);
   const events = useCaseStore((state) => state.events);
   const updateScalar = useCaseStore((state) => state.updateScalar);
+  const updateNibp = useCaseStore((state) => state.updateNibp);
   const updateEventTime = useCaseStore((state) => state.updateEventTime);
+  const upsertEvent = useCaseStore((state) => state.upsertEvent);
 
   const now = useCurrentTime(NOW_INTERVAL_MS, endedAt);
   const [draft, setDraft] = useState<EntryDraft | null>(null);
@@ -81,6 +97,9 @@ export function VitalTimeline() {
   const [dragPreview, setDragPreview] = useState<DragPreview | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [crosshair, setCrosshair] = useState<CrosshairState | null>(null);
+  const [selectedEventType, setSelectedEventType] = useState<TimelineEventType | null>(null);
+  const [lanePreview, setLanePreview] = useState<LanePlacementPreview | null>(null);
+  const [intervalTooltip, setIntervalTooltip] = useState<IntervalTooltipState | null>(null);
 
   const width = Math.max(MIN_WIDTH, Math.round(size.width) || MIN_WIDTH);
   const layout = useMemo(() => computeTimelineLayout(width), [width]);
@@ -92,8 +111,8 @@ export function VitalTimeline() {
     [domain.start, domain.end, layout],
   );
   const ticks = useMemo(
-    () => relativeTimelineTicks(domain.start, domain.end),
-    [domain.start, domain.end],
+    () => relativeTimelineTicks(domain.start, domain.end, layout.plotWidth),
+    [domain.start, domain.end, layout.plotWidth],
   );
 
   const scalarsOf = (kind: VitalKind) =>
@@ -107,7 +126,7 @@ export function VitalTimeline() {
       const last = list[list.length - 1];
       if (!last) continue;
       map[kind] = last.kind === "nibp"
-        ? `${last.systolic}/${last.diastolic} (MAD ${last.mean})`
+        ? `${last.systolic ?? "–"}/${last.diastolic ?? "–"} (M ${last.mean})`
         : `${formatVitalNumber(kind, last.value)} ${VITAL_CONFIG[kind].unit}`;
     }
     return map;
@@ -118,13 +137,14 @@ export function VitalTimeline() {
       const x = timeToX(xScale, measurement.time);
       if (measurement.kind === "nibp") {
         const scale = yScales.nibp;
+        const meanY = scale(measurement.mean);
         return {
           id: measurement.id,
           shape: "nibp" as const,
           x,
-          y1: scale(measurement.systolic),
-          y2: scale(measurement.diastolic),
-          meanY: scale(measurement.mean),
+          y1: measurement.systolic === null ? meanY - 16 : scale(measurement.systolic),
+          y2: measurement.diastolic === null ? meanY + 16 : scale(measurement.diastolic),
+          meanY,
         };
       }
       return { id: measurement.id, shape: "point" as const, x, y: yScales[measurement.kind](measurement.value) };
@@ -132,7 +152,7 @@ export function VitalTimeline() {
     [measurements, xScale, yScales],
   );
 
-  const openEdit = (measurement: Measurement) => {
+  const openEdit = (measurement: Measurement, nibpFocus?: "systolic" | "diastolic") => {
     setSelectedId(measurement.id);
     setCrosshair(crosshairForMeasurement(measurement, xScale, yScales));
     if (measurement.kind === "nibp") {
@@ -143,6 +163,7 @@ export function VitalTimeline() {
         systolic: measurement.systolic,
         mean: measurement.mean,
         diastolic: measurement.diastolic,
+        ...(nibpFocus ? { focusPart: nibpFocus } : {}),
       });
     } else {
       setDraft({
@@ -170,13 +191,27 @@ export function VitalTimeline() {
     });
   };
 
+  const showTimeError = (error: TimelineTimeError) => {
+    if (error === "future") message.warning("Zukünftige Werte können nicht dokumentiert werden.");
+    if (error === "beforeStart") message.warning("Werte vor dem Start können nicht dokumentiert werden.");
+    if (error === "afterEnd") {
+      message.error("Nach dem Ende des Eingriffs können keine neuen Einträge dokumentiert werden.");
+    }
+  };
+
+  const intervalAtPointer = (clientX: number, clientY: number, locked: boolean): IntervalTooltipState | null => {
+    const rect = svgRef.current?.getBoundingClientRect();
+    if (!rect) return null;
+    const x = clampValue(clientX - rect.left, layout.plotLeft, layout.plotRight);
+    const y = clampValue(clientY - rect.top, layout.plotTop, layout.plotBottom);
+    const time = xToTime(xScale, x);
+    const items = therapyIntervalsAtTime(time, medications, infusions, nowValue, endedAt);
+    return items.length > 0 ? { items, x, y, locked } : null;
+  };
+
   const openCreate = (mapped: CursorMap) => {
     if (!mapped.ok) {
-      if (mapped.reason === "future") message.warning("Zukünftige Werte können nicht dokumentiert werden.");
-      if (mapped.reason === "beforeStart") message.warning("Werte vor dem Start können nicht dokumentiert werden.");
-      if (mapped.reason === "afterEnd") {
-        message.error("Nach dem Ende des Eingriffs können keine neuen Einträge dokumentiert werden.");
-      }
+      showTimeError(mapped.reason);
       setCrosshair({ ...mapped, locked: false });
       return;
     }
@@ -263,6 +298,7 @@ export function VitalTimeline() {
       if ((event.pointerType === "mouse" || event.pointerType === "pen") && !draft && !therapyDraft) {
         const mapped = mapPointer(event.clientX, event.clientY);
         setCrosshair("svgX" in mapped ? { ...mapped, locked: false } : null);
+        setIntervalTooltip(intervalAtPointer(event.clientX, event.clientY, false));
       }
       return;
     }
@@ -283,6 +319,16 @@ export function VitalTimeline() {
     const state = pointerRef.current;
     if (!state.active || state.pointerId !== event.pointerId) return;
     const target = state.targetId ? measurements.find((measurement) => measurement.id === state.targetId) : null;
+    if (!state.moved && !target && event.pointerType === "touch") {
+      const touchedInterval = intervalAtPointer(event.clientX, event.clientY, true);
+      if (touchedInterval && !intervalTooltip?.locked) {
+        setIntervalTooltip(touchedInterval);
+        try { event.currentTarget.releasePointerCapture(event.pointerId); } catch { /* ignore */ }
+        resetPointer();
+        return;
+      }
+      if (!touchedInterval) setIntervalTooltip(null);
+    }
     if (state.dragging && target?.kind !== "nibp" && target) {
       finishScalarDrag(target);
     } else if (!state.moved) {
@@ -300,9 +346,12 @@ export function VitalTimeline() {
     setDraft(null);
     setSelectedId(null);
     setCrosshair(null);
+    setIntervalTooltip(null);
   };
   const openTherapyDraft = (next: TherapyDraft) => {
     setCrosshair(null);
+    setIntervalTooltip(null);
+    setLanePreview(null);
     setTherapyDraft(next);
   };
 
@@ -321,21 +370,9 @@ export function VitalTimeline() {
   };
 
   const showData = startedAt !== null;
-  const defaultActionTime = endedAt ?? nowValue;
 
   return (
     <>
-      <TherapyToolbar
-        disabled={startedAt === null}
-        onAddMedication={() => openTherapyDraft({ mode: "create-medication", startTime: defaultActionTime })}
-        onAddInfusion={() => openTherapyDraft({ mode: "create-infusion", startTime: defaultActionTime })}
-        onSelectEvent={(eventType) => {
-          const existing = events.find((entry) => entry.eventType === eventType);
-          openTherapyDraft(existing
-            ? { mode: "edit-event", entry: existing }
-            : { mode: "create-event", eventType, time: defaultActionTime });
-        }}
-      />
       <div ref={containerRef} className="timeline-surface" data-testid="vital-timeline">
         {now === null ? <div style={{ height: layout.height }} /> : (
           <svg
@@ -354,6 +391,39 @@ export function VitalTimeline() {
             ))}
             <TimeGrid layout={layout} xScale={xScale} majorTicks={ticks.major} minorTicks={ticks.minor} />
             <TherapyDurationLayer layout={layout} xScale={xScale} now={nowValue} endedAt={endedAt} medications={medications} infusions={infusions} />
+            {startedAt !== null ? (
+              <TherapyLaneInteractionLayer
+                layout={layout}
+                xScale={xScale}
+                startedAt={startedAt}
+                endedAt={endedAt}
+                now={nowValue}
+                selectedEvent={selectedEventType}
+                preview={lanePreview}
+                onPreview={setLanePreview}
+                onCreateMedication={(time) => openTherapyDraft({ mode: "create-medication", startTime: time })}
+                onCreateInfusion={(time) => openTherapyDraft({ mode: "create-infusion", startTime: time })}
+                onPlaceEvent={(eventType, time) => {
+                  upsertEvent(eventType, time);
+                  setSelectedEventType(null);
+                  setLanePreview(null);
+                  message.success("Ereignis platziert.");
+                }}
+                onInvalid={showTimeError}
+                onMissingEvent={() => message.warning("Bitte zuerst links ein Ereignissymbol auswählen.")}
+              />
+            ) : null}
+            <EventLaneTools
+              layout={layout}
+              disabled={startedAt === null || endedAt !== null}
+              selected={selectedEventType}
+              onSelect={(eventType) => {
+                // Eine erneute Beruehrung desselben Werkzeugs darf die Auswahl
+                // nicht unbemerkt aufheben (wichtig fuer iPad/Pen-Clickfolgen).
+                setSelectedEventType(eventType);
+                setLanePreview(null);
+              }}
+            />
 
             {showData ? (
               <>
@@ -377,18 +447,28 @@ export function VitalTimeline() {
               onPointerUp={onPlotPointerUp}
               onPointerCancel={() => {
                 setDragPreview(null);
+                setIntervalTooltip(null);
                 resetPointer();
               }}
               onPointerLeave={() => {
                 if (!crosshair?.locked && !draft) setCrosshair(null);
+                if (!intervalTooltip?.locked) setIntervalTooltip(null);
               }}
             />
 
             {showData ? (
               <>
+                <NibpHandleLayer
+                  measurements={nibps}
+                  ctx={ctx}
+                  onUpdate={updateNibp}
+                  onEdit={(measurement, part) => openEdit(measurement, part)}
+                />
                 <TherapyMarkerLayer
                   layout={layout}
                   xScale={xScale}
+                  now={nowValue}
+                  endedAt={endedAt}
                   medications={medications}
                   infusions={infusions}
                   events={events}
@@ -402,6 +482,9 @@ export function VitalTimeline() {
                 />
                 <CurrentTimeIndicator layout={layout} xScale={xScale} startedAt={startedAt} now={nowValue} />
               </>
+            ) : null}
+            {intervalTooltip ? (
+              <TherapyIntervalTooltip items={intervalTooltip.items} x={intervalTooltip.x} y={intervalTooltip.y} layout={layout} />
             ) : null}
             <CrosshairLayer crosshair={crosshair} layout={layout} />
             {renderDraftPreview(draft, xScale, yScales)}

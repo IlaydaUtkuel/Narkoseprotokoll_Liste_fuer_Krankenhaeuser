@@ -51,6 +51,8 @@ export function TimeGrid({ layout, xScale, majorTicks, minorTicks }: Props) {
       {majorTicks.map((t) => {
         const x = timeToX(xScale, t);
         const showLabel = labeled.has(t);
+        const nearLeft = x < layout.plotLeft + 26;
+        const nearRight = x > layout.plotRight - 26;
         return (
           <g key={t}>
             <line
@@ -63,9 +65,9 @@ export function TimeGrid({ layout, xScale, majorTicks, minorTicks }: Props) {
             />
             {showLabel ? (
               <text
-                x={x}
-                y={layout.plotBottom + 34}
-                textAnchor="middle"
+                x={nearLeft ? x + 3 : nearRight ? x - 3 : x}
+                y={layout.plotBottom + 18}
+                textAnchor={nearLeft ? "start" : nearRight ? "end" : "middle"}
                 className="timeline-axis-label"
               >
                 {formatHm(t)}

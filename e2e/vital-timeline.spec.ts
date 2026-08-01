@@ -30,6 +30,14 @@ async function tapBandFraction(page: Page, kind: string, fraction: number) {
   await page.mouse.click(pt.x, pt.y);
 }
 
+async function tapLaneFraction(page: Page, kind: "event" | "medication" | "infusion", fraction: number) {
+  const point = await page.evaluate(({ laneKind, fractionValue }) => {
+    const lane = document.querySelector(`[data-testid="lane-create-${laneKind}"]`)!.getBoundingClientRect();
+    return { x: lane.left + lane.width * fractionValue, y: lane.top + lane.height / 2 };
+  }, { laneKind: kind, fractionValue: fraction });
+  await page.mouse.click(point.x, point.y);
+}
+
 // Tap auf ein konkretes Element (z.B. einen bestehenden Messpunkt).
 async function tapSelector(page: Page, selector: string) {
   const pt = await page.evaluate((sel) => {
@@ -50,18 +58,47 @@ async function startCase(page: Page) {
 
 async function addScalar(page: Page, kind: string, value: number) {
   await tapBandNow(page, kind);
-  await page.getByTestId("entry-value").fill(String(value));
+  if (kind === "temperature") {
+    const picker = page.getByRole("combobox", { name: "Temperatur auswählen" });
+    await picker.fill(value.toFixed(1).replace(".", ","));
+    await picker.press("Enter");
+  } else {
+    await page.getByTestId("entry-value").fill(String(value));
+  }
   await page.getByTestId("entry-save").click();
   await expect(page.getByTestId("entry-value")).toHaveCount(0);
 }
 
 async function addNibp(page: Page, sys: number, mean: number, dia: number) {
   await tapBandNow(page, "nibp");
-  await page.getByTestId("entry-systolic").fill(String(sys));
   await page.getByTestId("entry-mean").fill(String(mean));
+  await page.getByTestId("entry-save").click();
+  await expect(page.getByTestId("entry-mean")).toHaveCount(0);
+
+  const dragHandleToValue = async (part: "systolic" | "diastolic", value: number) => {
+    const position = await page.evaluate(({ partName, targetValue }) => {
+      const hit = document.querySelector(`[data-testid="nibp-handle-${partName}"] > circle[role="button"]`)!;
+      const svg = document.querySelector('[data-testid="vital-timeline-svg"]')!.getBoundingClientRect();
+      const band = document.querySelector('[data-testid="band-nibp"]')!;
+      const hitRect = hit.getBoundingClientRect();
+      const bandY = Number(band.getAttribute("y"));
+      const bandHeight = Number(band.getAttribute("height"));
+      const innerTop = bandY + 12;
+      const innerHeight = bandHeight - 24;
+      const targetY = svg.top + innerTop + ((220 - targetValue) / (220 - 30)) * innerHeight;
+      return { x: hitRect.left + hitRect.width / 2, fromY: hitRect.top + hitRect.height / 2, targetY };
+    }, { partName: part, targetValue: value });
+    await page.mouse.move(position.x, position.fromY);
+    await page.mouse.down();
+    await page.mouse.move(position.x, position.targetY, { steps: 5 });
+    await page.mouse.up();
+  };
+
+  await dragHandleToValue("systolic", sys);
+  await page.getByTestId("nibp-handle-diastolic").locator('circle[role="button"]').click();
   await page.getByTestId("entry-diastolic").fill(String(dia));
   await page.getByTestId("entry-save").click();
-  await expect(page.getByTestId("entry-systolic")).toHaveCount(0);
+  await expect(page.getByTestId("entry-diastolic")).toHaveCount(0);
 }
 
 function hexToRgb(hex: string): string {
@@ -150,6 +187,26 @@ test("Story 2: vier Parameter, gemeinsame Zeitachse, korrekte Farben", async ({ 
   await addScalar(page, "heartRate", 72);
   await addNibp(page, 120, 90, 70);
   await addScalar(page, "temperature", 36.7);
+
+  const persistedNibp = await page.evaluate(() =>
+    JSON.parse(localStorage.getItem("sikant-anesthesia-demo-case:v1")!).measurements.find((measurement: { kind: string }) => measurement.kind === "nibp"),
+  );
+  expect(persistedNibp).toMatchObject({ systolic: 120, mean: 90, diastolic: 70 });
+  await page.getByTestId("nibp-handle-systolic").hover();
+  await expect(page.locator('[data-testid^="nibp-values-"]')).toContainText("S 120 · M 90 · D 70");
+  await expect(page.locator('[data-testid^="nibp-values-"]')).toContainText("mmHg");
+
+  // Kurzer Klick auf den weißen Griff öffnet die direkte Zahleneingabe;
+  // Drag bleibt weiterhin die schnelle grafische Alternative.
+  await page.getByTestId("nibp-handle-systolic").locator('circle[role="button"]').click();
+  await expect(page.getByTestId("entry-systolic")).toHaveValue("120");
+  await expect(page.getByTestId("entry-diastolic")).toHaveValue("70");
+  await page.getByTestId("entry-systolic").fill("125");
+  await page.getByTestId("entry-save").click();
+  const directlyEditedNibp = await page.evaluate(() =>
+    JSON.parse(localStorage.getItem("sikant-anesthesia-demo-case:v1")!).measurements.find((measurement: { kind: string }) => measurement.kind === "nibp"),
+  );
+  expect(directlyEditedNibp).toMatchObject({ systolic: 125, mean: 90, diastolic: 70 });
 
   await expect(page.locator('[data-testid="points-spo2"] circle')).toHaveCount(1);
   await expect(page.locator('[data-testid="points-heartRate"] circle')).toHaveCount(1);
@@ -263,6 +320,32 @@ test("Story 4: Eingriff beenden, Zeit einfrieren und Reload", async ({ page }) =
   expect(await page.getByTestId("now-dot").getAttribute("cx")).toBe(frozenX);
   await tapBandFraction(page, "spo2", 0.5);
   await expect(page.getByText("Nach dem Ende des Eingriffs können keine neuen Einträge dokumentiert werden.")).toBeVisible();
+
+  // Abschluss öffnet eine neue Registerkarte, archiviert zuerst und setzt dann
+  // Basisdaten + aktiven Fall für den nächsten Patienten zurück.
+  await expect(page.getByTestId("save-close-case")).toBeVisible();
+  const popupPromise = page.waitForEvent("popup");
+  await page.getByTestId("save-close-case").click();
+  const closePage = await popupPromise;
+  await closePage.waitForLoadState("domcontentloaded");
+  await expect(closePage.getByRole("heading", { name: "Speichern und Schließen" })).toBeVisible();
+  await closePage.getByTestId("archive-folder-path").fill("C:\\Narkoseprotokolle");
+  await closePage.getByTestId("archive-ok").click();
+  await closePage.getByRole("button", { name: "Speichern und Schließen", exact: true }).click();
+  await expect(closePage.getByTestId("case-close-complete")).toBeVisible();
+  const storageAfterClose = await closePage.evaluate(() => ({
+    patient: localStorage.getItem("sikant-anesthesia-demo.patient-base-data.v1"),
+    activeCase: localStorage.getItem("sikant-anesthesia-demo-case:v1"),
+    archives: JSON.parse(localStorage.getItem("sikant-anesthesia-demo-archives:v1") || "[]").length,
+  }));
+  expect(storageAfterClose.patient).toBeNull();
+  expect(storageAfterClose.activeCase).toBeNull();
+  expect(storageAfterClose.archives).toBe(1);
+  await closePage.getByTestId("new-case-start").click();
+  await expect(closePage.getByRole("heading", { name: "Basisdaten des Narkosefalls" })).toBeVisible();
+  await expect(closePage.getByTestId("input-patientName")).toHaveValue("");
+  await closePage.getByTestId("weiter").click();
+  await expect(closePage.getByTestId("start-button")).toBeVisible();
 });
 
 test("Story 5: präzise Hit-Area und Crosshair auf freier Fläche", async ({ page }) => {
@@ -327,9 +410,9 @@ test("Story 7: ein- und fünfminütige Gridlinien", async ({ page }) => {
 
 test("Story 8: Medikamente und Infusionen CRUD mit Persistence", async ({ page }) => {
   await page.goto("/dokumentation");
-  await startCase(page);
+  await seedStartedCase(page, 20);
 
-  await page.getByTestId("add-medication").click();
+  await tapLaneFraction(page, "medication", 0.05);
   await page.getByTestId("medication-name").fill("Demo-Bolus");
   await page.getByTestId("medication-dose").fill("2");
   await page.getByTestId("medication-unit").fill("mg");
@@ -338,8 +421,16 @@ test("Story 8: Medikamente und Infusionen CRUD mit Persistence", async ({ page }
   const medicationId = await page.evaluate(() => JSON.parse(localStorage.getItem("sikant-anesthesia-demo-case:v1")!).medications[0].id);
   await expect(page.getByTestId(`medication-${medicationId}`)).toBeVisible();
   await expect(page.getByTestId(`medication-duration-${medicationId}`)).toBeVisible();
+  await expect(page.getByTestId(`medication-hatch-${medicationId}-spo2`)).toBeVisible();
 
-  await page.getByTestId("add-medication").click();
+  const hatchPoint = await page.evaluate((id) => {
+    const hatch = document.querySelector(`[data-testid="medication-hatch-${id}-spo2"]`)!.getBoundingClientRect();
+    return { x: hatch.left + Math.min(8, hatch.width / 2), y: hatch.top + hatch.height / 2 };
+  }, medicationId);
+  await page.mouse.move(hatchPoint.x, hatchPoint.y);
+  await expect(page.getByTestId("therapy-interval-tooltip")).toContainText("Demo-Bolus");
+
+  await tapLaneFraction(page, "medication", 0.35);
   await page.getByText("Kontinuierliche Gabe", { exact: true }).click();
   await page.getByTestId("medication-name").fill("Demo-Perfusor");
   await page.getByTestId("medication-dose").fill("1");
@@ -347,7 +438,7 @@ test("Story 8: Medikamente und Infusionen CRUD mit Persistence", async ({ page }
   await page.getByTestId("medication-duration").fill("15");
   await page.getByTestId("therapy-save").click();
 
-  await page.getByTestId("add-infusion").click();
+  await page.getByTestId("lane-create-infusion").press("Enter");
   await page.getByTestId("infusion-name").fill("Ringer");
   await page.getByTestId("infusion-amount").fill("500");
   await page.getByTestId("infusion-unit").fill("ml");
@@ -373,9 +464,10 @@ test("Story 9: fünf Phasen, Event-Drag und Entfernen", async ({ page }) => {
   await page.goto("/dokumentation");
   await seedStartedCase(page, 20);
   const types = ["anesthesiaStart", "incision", "suture", "emergenceEnd", "patientOut"];
-  for (const type of types) {
-    await page.getByTestId(`add-event-${type}`).click();
-    await page.getByTestId("therapy-save").click();
+  for (const [index, type] of types.entries()) {
+    await page.getByTestId(`select-event-${type}`).click();
+    await expect(page.getByTestId(`select-event-${type}`)).toHaveAttribute("aria-pressed", "true");
+    await tapLaneFraction(page, "event", 0.08 + index * 0.06);
     await expect(page.getByTestId(`event-${type}`)).toBeVisible();
   }
   expect(await page.getByTestId("event-line").count()).toBe(5);
@@ -397,4 +489,49 @@ test("Story 9: fünf Phasen, Event-Drag und Entfernen", async ({ page }) => {
   await page.locator(".ant-popconfirm").getByRole("button", { name: "Entfernen", exact: true }).click();
   await page.reload();
   await expect(page.getByTestId("event-incision")).toHaveCount(0);
+});
+
+test("Story 10: kontextuelle Lanes, stabile Ereignisauswahl und große lesbare Ansicht", async ({ page }) => {
+  await page.goto("/dokumentation");
+  await seedStartedCase(page, 20);
+
+  await expect(page.getByTestId("add-medication")).toHaveCount(0);
+  await expect(page.getByTestId("add-infusion")).toHaveCount(0);
+  await expect(page.getByTestId("event-lane-tools")).toBeVisible();
+
+  const medicationHover = await page.getByTestId("lane-create-medication").boundingBox();
+  expect(medicationHover).not.toBeNull();
+  await page.mouse.move(medicationHover!.x + medicationHover!.width * 0.2, medicationHover!.y + medicationHover!.height / 2);
+  await expect(page.getByTestId("lane-placement-preview")).toContainText(/\d{2}:\d{2}:\d{2} · Medikament anlegen/);
+  await page.mouse.click(medicationHover!.x + medicationHover!.width * 0.2, medicationHover!.y + medicationHover!.height / 2);
+  await expect(page.getByTestId("therapy-time")).not.toHaveValue("");
+  await page.getByRole("button", { name: "Abbrechen", exact: true }).click();
+
+  await page.getByTestId("select-event-incision").click();
+  await page.getByTestId("select-event-incision").click();
+  await expect(page.getByTestId("select-event-incision")).toHaveAttribute("aria-pressed", "true");
+  const eventHover = await page.getByTestId("lane-create-event").boundingBox();
+  expect(eventHover).not.toBeNull();
+  await page.mouse.move(eventHover!.x + eventHover!.width * 0.2, eventHover!.y + eventHover!.height / 2);
+  await expect(page.getByTestId("lane-placement-preview")).toContainText("Schnitt platzieren");
+  await tapLaneFraction(page, "event", 0.2);
+  await page.getByTestId("event-hit-incision").click();
+  const eventPicker = page.getByTestId("event-type").getByRole("combobox");
+  await eventPicker.click();
+  await page.locator(".ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-item-option", { hasText: "Naht" }).click();
+  await page.getByTestId("therapy-save").click();
+  await expect(page.getByTestId("event-incision")).toHaveCount(0);
+  await expect(page.getByTestId("event-suture")).toBeVisible();
+
+  const layout = await page.evaluate(() => ({
+    svgHeight: Number(document.querySelector('[data-testid="vital-timeline-svg"]')?.getAttribute("height")),
+    spo2Height: Number(document.querySelector('[data-testid="band-spo2"]')?.getAttribute("height")),
+    nibpHeight: Number(document.querySelector('[data-testid="band-nibp"]')?.getAttribute("height")),
+    eventToolsTop: document.querySelector('[data-testid="event-lane-tools"]')?.getBoundingClientRect().top,
+    eventLaneTop: document.querySelector('[data-testid="lane-events"]')?.getBoundingClientRect().top,
+  }));
+  expect(layout.svgHeight).toBeGreaterThan(950);
+  expect(layout.spo2Height).toBeGreaterThanOrEqual(160);
+  expect(layout.nibpHeight).toBeGreaterThanOrEqual(170);
+  expect(layout.eventToolsTop).toBeGreaterThanOrEqual(layout.eventLaneTop!);
 });

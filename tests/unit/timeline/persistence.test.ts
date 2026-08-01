@@ -82,6 +82,31 @@ describe("casePersistence", () => {
     expect(migrated?.measurements).toEqual(sample.measurements);
   });
 
+  it("migriert schemaVersion 2 und erhält vollständige NiBP-Werte", () => {
+    const migrated = parseCase({ ...sample, schemaVersion: 2 });
+    expect(migrated).toMatchObject({
+      schemaVersion: CASE_SCHEMA_VERSION,
+      measurements: [{ kind: "spo2" }, { kind: "nibp", systolic: 120, mean: 90, diastolic: 70 }],
+    });
+  });
+
+  it("lädt in schemaVersion 3 einen Mittelwert mit noch offenen Griffen", () => {
+    const partial = parseCase({
+      ...sample,
+      measurements: [{
+        id: "partial",
+        kind: "nibp",
+        time: START,
+        systolic: null,
+        mean: 88,
+        diastolic: null,
+        createdAt: START,
+        updatedAt: START,
+      }],
+    });
+    expect(partial?.measurements[0]).toMatchObject({ systolic: null, mean: 88, diastolic: null });
+  });
+
   it("parseCase lehnt unvollstaendige Messungen ab", () => {
     expect(
       parseCase({ schemaVersion: CASE_SCHEMA_VERSION, measurements: [{ id: "x", kind: "spo2", time: START }] }),

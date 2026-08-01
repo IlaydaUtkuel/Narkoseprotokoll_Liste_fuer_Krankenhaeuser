@@ -33,7 +33,7 @@
 .timeline-axis-label,
 .timeline-y-label {
   fill: var(--timeline-axis-text);
-  font-size: 11px;
+  font-size: 12px;
 }
 .timeline-now-label {
   fill: var(--timeline-now-dark);
@@ -146,7 +146,7 @@ body {
 
 /* Dezente Markenanzeige links oben (auf jeder Route). */
 .brand-header {
-  padding: 12px 16px 0;
+  padding: 6px 12px 0;
   display: flex;
   align-items: center;
 }
@@ -166,7 +166,7 @@ body {
 }
 
 .doc-container {
-  max-width: 1180px;
+  max-width: 1760px;
   margin: 0 auto;
 }
 
@@ -201,7 +201,7 @@ body {
 
 .case-header__back {
   display: inline-block;
-  margin-top: 6px;
+  margin-top: 2px;
   color: #1f7a63;
   font-weight: 600;
   font-size: 14px;
@@ -218,7 +218,7 @@ body {
   font-weight: 700;
   color: #173029;
   font-size: 16px;
-  padding: 8px 14px;
+  padding: 5px 9px;
   background: #eaf5ec;
   border-radius: 8px;
 }
@@ -259,20 +259,6 @@ body {
   overflow: hidden;
 }
 
-.therapy-toolbar {
-  display: grid;
-  gap: 8px;
-  margin: 4px 0 10px;
-  padding: 10px;
-  background: #fff;
-  border: 1px solid #e4ebe8;
-  border-radius: 12px;
-}
-
-.event-actions .ant-btn {
-  font-size: 12px;
-}
-
 .therapy-lane {
   fill: #fbfdfc;
   stroke: #e1ebe7;
@@ -291,50 +277,33 @@ body {
   fill: #fbfcf7;
 }
 
-.therapy-duration {
-  stroke-width: 0;
-}
-
-.therapy-duration--medication {
-  fill: rgba(114, 46, 209, 0.075);
-}
-
-.therapy-duration--infusion {
-  fill: rgba(8, 145, 178, 0.065);
-}
-
 .therapy-start-line {
-  stroke-width: 1.35;
-  stroke-dasharray: 3 3;
-}
-
-.therapy-start-line--medication {
-  stroke: #722ed1;
-}
-
-.therapy-start-line--infusion {
-  stroke: #0891b2;
-}
-
-.therapy-marker-dot--medication {
-  fill: #722ed1;
-}
-
-.therapy-marker-dot--infusion {
-  fill: #0891b2;
+  opacity: 0.85;
 }
 
 .therapy-marker-label,
 .event-marker-label {
   fill: #203a34;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 700;
 }
 
 .therapy-marker-time,
 .event-marker-time {
   fill: var(--timeline-axis-text);
-  font-size: 10px;
+  font-size: 11px;
+}
+
+.timeline-axis-label,
+.timeline-now-label,
+.therapy-marker-label,
+.therapy-marker-time,
+.event-marker-label,
+.event-marker-time {
+  paint-order: stroke fill;
+  stroke: rgba(255, 255, 255, 0.98);
+  stroke-width: 4px;
+  stroke-linejoin: round;
 }
 
 .timeline-event-line {
@@ -369,6 +338,119 @@ body {
   fill: #fff;
   font-size: 11px;
   font-weight: 700;
+}
+
+.event-tool-list {
+  display: flex;
+  gap: 5px;
+  align-items: center;
+  height: 100%;
+}
+
+.event-tool {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid #c9d7d2;
+  border-radius: 7px;
+  background: #ffffff;
+  color: #694600;
+  font-size: 14px;
+  font-weight: 800;
+  line-height: 26px;
+  cursor: pointer;
+}
+
+.event-tool--selected {
+  background: #fff1b8;
+  border-color: #8b5e00;
+  box-shadow: 0 0 0 1px #8b5e00;
+}
+
+.event-tool:focus-visible,
+.therapy-lane-hit:focus-visible {
+  outline: 2px solid #1f7a63;
+  outline-offset: 1px;
+}
+
+.event-tool:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.lane-preview-line {
+  stroke: #1f7a63;
+  stroke-width: 1.25;
+  stroke-dasharray: 4 3;
+}
+
+.lane-preview-line--invalid {
+  stroke: #cf1322;
+}
+
+.lane-preview-symbol {
+  fill: #694600;
+  font-size: 15px;
+  font-weight: 800;
+}
+
+.lane-preview-tooltip,
+.therapy-interval-tooltip,
+.nibp-value-tooltip {
+  fill: rgba(23, 48, 41, 0.95);
+}
+
+.lane-preview-tooltip__text,
+.therapy-interval-tooltip__name,
+.nibp-value-tooltip__values {
+  fill: #ffffff;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.therapy-interval-tooltip__time,
+.nibp-value-tooltip__unit {
+  fill: #cfe6de;
+  font-size: 9px;
+  font-weight: 600;
+}
+
+.nibp-handle {
+  fill: #ffffff;
+  stroke: var(--vital-nibp-dark);
+  stroke-width: 2;
+}
+
+.nibp-handle--unset {
+  fill: #e8edf0;
+  stroke-dasharray: 2 1;
+}
+
+.nibp-form-unit {
+  color: #5a6a66;
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 5px;
+}
+
+.nibp-form-help {
+  color: #5a6a66;
+  font-size: 13px;
+  line-height: 1.35;
+  margin: -4px 0 12px;
+}
+
+.nibp-endpoint-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+@media (max-width: 560px) {
+  .nibp-endpoint-fields {
+    grid-template-columns: 1fr;
+    gap: 0;
+  }
 }
 
 .crosshair-vertical {
@@ -432,13 +514,9 @@ body {
     padding-inline: 8px;
   }
 
-  .timeline-surface {
-    padding: 4px;
-  }
-
-  .therapy-toolbar {
-    padding: 8px;
-  }
+  .timeline-surface { padding: 4px; }
+  .case-header { gap: 7px; }
+  .case-header__actions { gap: 7px; }
 }
 
 /* Kleiner, unaufdringlicher Offline-Hinweis. */
@@ -464,4 +542,32 @@ body {
 
 .remove-all-button:hover {
   color: #cf1322;
+}
+
+.close-case-page {
+  min-height: calc(100dvh - 48px);
+  padding: 36px 20px 72px;
+}
+
+.close-case-card {
+  width: min(680px, 100%);
+  margin: 0 auto;
+  padding: 28px;
+  border: 1px solid #dce7e3;
+  border-radius: 16px;
+  background: #ffffff;
+  box-shadow: 0 8px 28px rgba(23, 48, 41, 0.08);
+}
+
+.close-case-card h1 {
+  margin-top: 0;
+  color: #173029;
+}
+
+.close-case-note {
+  margin-top: 18px;
+}
+
+.close-case-error {
+  margin-bottom: 16px;
 }

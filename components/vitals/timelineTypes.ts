@@ -37,7 +37,15 @@ export type EntryDraft =
   | { mode: "create-scalar"; kind: ScalarKind; time: number; value: number }
   | { mode: "edit-scalar"; id: string; kind: ScalarKind; time: number; value: number }
   | { mode: "create-nibp"; time: number; mean: number }
-  | { mode: "edit-nibp"; id: string; time: number; systolic: number; mean: number; diastolic: number };
+  | {
+      mode: "edit-nibp";
+      id: string;
+      time: number;
+      systolic: number | null;
+      mean: number;
+      diastolic: number | null;
+      focusPart?: "systolic" | "diastolic";
+    };
 
 export type TherapyDraft =
   | { mode: "create-medication"; startTime: number }

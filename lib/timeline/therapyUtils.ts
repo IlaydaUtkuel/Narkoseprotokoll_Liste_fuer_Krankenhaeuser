@@ -18,8 +18,10 @@ export function displayEndTime(
   currentTime: number,
   endedAt: number | null,
 ): number | null {
-  const hardLimit = endedAt === null ? currentTime : Math.min(currentTime, endedAt);
-  if (entry.ongoing) return Math.max(entry.startTime, hardLimit);
+  const runningLimit = endedAt === null ? currentTime : Math.min(currentTime, endedAt);
+  if (entry.ongoing) return Math.max(entry.startTime, runningLimit);
   const explicit = explicitEndTime(entry);
-  return explicit === null ? null : Math.max(entry.startTime, Math.min(explicit, hardLimit));
+  if (explicit === null) return null;
+  const explicitLimit = endedAt === null ? explicit : Math.min(explicit, endedAt);
+  return Math.max(entry.startTime, explicitLimit);
 }

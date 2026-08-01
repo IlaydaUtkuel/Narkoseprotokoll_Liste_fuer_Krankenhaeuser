@@ -52,6 +52,16 @@ test("Kalenderauswahl wird sofort gespeichert und bleibt nach Reload erhalten", 
   await expect(page.getByTestId("input-birthDate")).toHaveValue(expected);
 });
 
+test("OP-Datum öffnet leer bei heute und bietet Heute als Direktwahl", async ({ page }) => {
+  await page.getByTestId("field-operationDate").getByRole("button", { name: "Kalender öffnen" }).click();
+  const dropdown = page.locator(".ant-picker-dropdown");
+  await expect(dropdown).toBeVisible();
+  await expect(dropdown.locator(".ant-picker-now-btn", { hasText: "Heute" })).toBeVisible();
+  await expect(dropdown.locator(`.ant-picker-cell-in-view[title="${isoDate(new Date())}"]`)).toBeVisible();
+  await dropdown.locator(".ant-picker-now-btn", { hasText: "Heute" }).click();
+  await expect(page.getByTestId("input-operationDate")).toHaveValue(deDate(new Date()));
+});
+
 test("Geburtsdatum-Validierung", async ({ page }) => {
   const birth = page.getByTestId("input-birthDate");
   const error = page.getByTestId("error-birthDate");

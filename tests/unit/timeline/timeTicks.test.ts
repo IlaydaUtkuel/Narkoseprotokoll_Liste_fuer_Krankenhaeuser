@@ -40,4 +40,12 @@ describe("relativeFiveMinuteTicks", () => {
     expect(ticks.minor).toContain(start + 6 * MIN);
     expect(ticks.minor.some((tick) => ticks.major.includes(tick))).toBe(false);
   });
+
+  it("duennt Linien bei langen Eingriffen passend zur Plotbreite aus", () => {
+    const start = new Date(2026, 6, 31, 1, 0, 0).getTime();
+    const ticks = relativeTimelineTicks(start, start + 17 * 60 * MIN, 1400);
+    expect(ticks.major[1] - ticks.major[0]).toBe(60 * MIN);
+    expect(ticks.minor[1] - ticks.minor[0]).toBe(10 * MIN);
+    expect(ticks.major.length + ticks.minor.length).toBeLessThan(120);
+  });
 });

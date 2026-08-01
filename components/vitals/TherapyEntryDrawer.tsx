@@ -1,16 +1,16 @@
 "use client";
 
-import { App, Button, Drawer, Flex, Form, Input, InputNumber, Popconfirm, Radio, Switch, TimePicker } from "antd";
+import { App, Button, Drawer, Flex, Form, Input, InputNumber, Popconfirm, Radio, Select, Switch, TimePicker } from "antd";
 import dayjs from "dayjs";
 import type { Dayjs } from "dayjs";
-import { eventDefinition } from "../../lib/timeline/events";
+import { eventDefinition, TIMELINE_EVENT_DEFINITIONS } from "../../lib/timeline/events";
 import {
   TIME_ERROR_MESSAGES,
   timestampFromClockParts,
   validateTimelineTime,
 } from "../../lib/timeline/timeValidation";
 import { useCaseStore, type NewInfusion, type NewMedication } from "../../store/anesthesiaCaseStore";
-import type { MedicationAdministrationType } from "../../types/vitals";
+import type { MedicationAdministrationType, TimelineEventType } from "../../types/vitals";
 import type { TherapyDraft } from "./timelineTypes";
 
 interface Props {
@@ -50,6 +50,7 @@ export function TherapyEntryDrawer({ draft, onClose }: Props) {
   const updateInfusion = useCaseStore((state) => state.updateInfusion);
   const removeInfusion = useCaseStore((state) => state.removeInfusion);
   const upsertEvent = useCaseStore((state) => state.upsertEvent);
+  const updateEvent = useCaseStore((state) => state.updateEvent);
   const removeEvent = useCaseStore((state) => state.removeEvent);
 
   const closeWithSuccess = (text: string) => {
@@ -130,9 +131,9 @@ export function TherapyEntryDrawer({ draft, onClose }: Props) {
                     }
                   : undefined
               }
-              onSubmit={(time) => {
-                const eventType = draft.mode === "edit-event" ? draft.entry.eventType : draft.eventType;
-                upsertEvent(eventType, time);
+              onSubmit={(eventType, time) => {
+                if (draft.mode === "edit-event") updateEvent(draft.entry.id, eventType, time);
+                else upsertEvent(eventType, time);
                 closeWithSuccess("Ereignis gespeichert.");
               }}
             />
@@ -325,21 +326,27 @@ function EventForm({
   draft: Extract<TherapyDraft, { mode: "create-event" | "edit-event" }>;
   startedAt: number;
   endedAt: number | null;
-  onSubmit: (time: number) => void;
+  onSubmit: (eventType: TimelineEventType, time: number) => void;
   onCancel: () => void;
   onDelete?: () => void;
 }) {
   const eventType = draft.mode === "edit-event" ? draft.entry.eventType : draft.eventType;
   const time = draft.mode === "edit-event" ? draft.entry.time : draft.time;
   return (
-    <Form<{ time: Dayjs }>
+    <Form<{ eventType: TimelineEventType; time: Dayjs }>
       layout="vertical"
-      initialValues={{ time: dayjs(time) }}
-      onFinish={({ time: value }) => onSubmit(clockToTimestamp(startedAt, value, time))}
+      initialValues={{ eventType, time: dayjs(time) }}
+      onFinish={({ eventType: selectedType, time: value }) => onSubmit(selectedType, clockToTimestamp(startedAt, value, time))}
     >
-      <div className="event-form-name">
-        <span aria-hidden>{eventDefinition(eventType).symbol}</span> {eventDefinition(eventType).label}
-      </div>
+      <Form.Item label="Ereignis" name="eventType" rules={[{ required: true }]}>
+        <Select
+          data-testid="event-type"
+          options={TIMELINE_EVENT_DEFINITIONS.map((definition) => ({
+            value: definition.type,
+            label: `${definition.symbol} ${definition.label}`,
+          }))}
+        />
+      </Form.Item>
       <TimelineTimeField startedAt={startedAt} endedAt={endedAt} originalTime={time} />
       <FormActions onCancel={onCancel} onDelete={onDelete} deleteLabel="Ereignis entfernen" />
     </Form>

@@ -1,4 +1,4 @@
-import { MINOR_TICK_INTERVAL_MS, TICK_INTERVAL_MS } from "./config";
+import { TICK_INTERVAL_MS } from "./config";
 
 export interface TimelineTicks {
   major: number[];
@@ -29,10 +29,36 @@ export function relativeTicks(
   return ticks;
 }
 
-export function relativeTimelineTicks(startedAt: number, domainEnd: number): TimelineTicks {
-  const major = relativeTicks(startedAt, domainEnd, TICK_INTERVAL_MS);
+const MINUTE = 60 * 1000;
+const MAJOR_INTERVALS = [5, 10, 15, 30, 60, 120, 180].map((minutes) => minutes * MINUTE);
+const MINOR_INTERVALS = [1, 2, 5, 10, 15, 30, 60].map((minutes) => minutes * MINUTE);
+
+function intervalForMinimumGap(
+  duration: number,
+  plotWidth: number,
+  minimumGap: number,
+  candidates: number[],
+): number {
+  if (!Number.isFinite(plotWidth) || plotWidth <= 0 || duration <= 0) return candidates[0];
+  const pixelsPerMs = plotWidth / duration;
+  return candidates.find((interval) => interval * pixelsPerMs >= minimumGap)
+    ?? candidates[candidates.length - 1];
+}
+
+// Kurze Faelle behalten das bekannte 1-/5-Minuten-Raster. Bei langen
+// Eingriffen wird das Raster anhand der verfuegbaren Pixelbreite ausgeduennt,
+// damit Linien, Zeittexte und Messwerte nicht zu einer Flaeche verschmelzen.
+export function relativeTimelineTicks(
+  startedAt: number,
+  domainEnd: number,
+  plotWidth: number = Number.POSITIVE_INFINITY,
+): TimelineTicks {
+  const duration = Math.max(1, domainEnd - startedAt);
+  const majorInterval = intervalForMinimumGap(duration, plotWidth, 64, MAJOR_INTERVALS);
+  const minorInterval = intervalForMinimumGap(duration, plotWidth, 10, MINOR_INTERVALS);
+  const major = relativeTicks(startedAt, domainEnd, majorInterval);
   const majorSet = new Set(major);
-  const minor = relativeTicks(startedAt, domainEnd, MINOR_TICK_INTERVAL_MS).filter(
+  const minor = relativeTicks(startedAt, domainEnd, minorInterval).filter(
     (tick) => !majorSet.has(tick),
   );
   return { major, minor };

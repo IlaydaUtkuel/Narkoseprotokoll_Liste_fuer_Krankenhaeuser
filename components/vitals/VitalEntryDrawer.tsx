@@ -1,6 +1,6 @@
 "use client";
 
-import { App, Button, Drawer, Flex, Form, InputNumber, Popconfirm, Space, TimePicker } from "antd";
+import { App, Button, Drawer, Flex, Form, InputNumber, Popconfirm, Select, TimePicker } from "antd";
 import dayjs from "dayjs";
 import type { Dayjs } from "dayjs";
 import { VITAL_CONFIG } from "../../lib/timeline/config";
@@ -89,17 +89,19 @@ export function VitalEntryDrawer({ draft, onClose }: Props) {
               onCancel={onClose}
               initial={
                 draft.mode === "edit-nibp"
-                  ? { systolic: draft.systolic, mean: draft.mean, diastolic: draft.diastolic }
-                  : { systolic: null, mean: draft.mean, diastolic: null }
+                  ? { mean: draft.mean, systolic: draft.systolic, diastolic: draft.diastolic }
+                  : { mean: draft.mean, systolic: null, diastolic: null }
               }
+              editing={draft.mode === "edit-nibp"}
+              focusPart={draft.mode === "edit-nibp" ? draft.focusPart : undefined}
               time={draft.time}
               startedAt={startedAt}
               endedAt={endedAt}
-              onSubmit={(time, v) => {
+              onSubmit={(time, mean, systolic, diastolic) => {
                 if (draft.mode === "create-nibp") {
-                  addMeasurement({ kind: "nibp", time, ...v });
+                  addMeasurement({ kind: "nibp", time, systolic: null, mean, diastolic: null });
                 } else if (draft.mode === "edit-nibp") {
-                  updateNibp(draft.id, time, v.systolic, v.mean, v.diastolic);
+                  updateNibp(draft.id, time, systolic, mean, diastolic);
                 }
                 onClose();
               }}
@@ -160,17 +162,29 @@ function ScalarForm({
         name="value"
         rules={[{ required: true, message: "Bitte einen Wert eingeben." }]}
       >
-        <InputNumber
-          data-testid="entry-value"
-          min={c.min}
-          max={c.max}
-          step={c.step}
-          precision={c.precision}
-          decimalSeparator={c.precision > 0 ? "," : undefined}
-          suffix={c.unit}
-          style={{ width: "100%" }}
-          autoFocus
-        />
+        {draft.kind === "temperature" ? (
+          <Select
+            data-testid="entry-value"
+            aria-label="Temperatur auswählen"
+            showSearch
+            optionFilterProp="label"
+            options={TEMPERATURE_OPTIONS}
+            popupMatchSelectWidth
+            style={{ width: "100%" }}
+            autoFocus
+          />
+        ) : (
+          <InputNumber
+            data-testid="entry-value"
+            min={c.min}
+            max={c.max}
+            step={c.step}
+            precision={c.precision}
+            suffix={c.unit}
+            style={{ width: "100%" }}
+            autoFocus
+          />
+        )}
       </Form.Item>
       <FormActions onCancel={onCancel} />
     </Form>
@@ -179,21 +193,30 @@ function ScalarForm({
 
 function NibpForm({
   initial,
+  editing,
+  focusPart,
   time,
   startedAt,
   endedAt,
   onSubmit,
   onCancel,
 }: {
-  initial: { systolic: number | null; mean: number | null; diastolic: number | null };
+  initial: { mean: number | null; systolic: number | null; diastolic: number | null };
+  editing: boolean;
+  focusPart?: "systolic" | "diastolic";
   time: number;
   startedAt: number | null;
   endedAt: number | null;
-  onSubmit: (time: number, v: { systolic: number; mean: number; diastolic: number }) => void;
+  onSubmit: (time: number, mean: number, systolic: number | null, diastolic: number | null) => void;
   onCancel: () => void;
 }) {
   const c = VITAL_CONFIG.nibp;
-  const [form] = Form.useForm<{ systolic: number; mean: number; diastolic: number; time: Dayjs }>();
+  const [form] = Form.useForm<{
+    mean: number;
+    systolic: number | null;
+    diastolic: number | null;
+    time: Dayjs;
+  }>();
 
   return (
     <Form
@@ -202,33 +225,108 @@ function NibpForm({
       initialValues={{ ...initial, time: dayjs(time) }}
       onFinish={(values) => {
         if (startedAt === null) return;
-        onSubmit(clockToTimestamp(startedAt, values.time, time), values);
+        onSubmit(
+          clockToTimestamp(startedAt, values.time, time),
+          values.mean,
+          values.systolic ?? null,
+          values.diastolic ?? null,
+        );
       }}
     >
       <TimeField startedAt={startedAt} endedAt={endedAt} originalTime={time} />
-      <Space orientation="horizontal" size={12} style={{ display: "flex" }} wrap>
-        <Form.Item
-          label="Systolisch"
-          name="systolic"
-          rules={[{ required: true, message: "Pflichtfeld" }]}
-        >
-          <InputNumber data-testid="entry-systolic" min={c.min} max={c.max} step={1} suffix={c.unit} />
-        </Form.Item>
-        <Form.Item label="Mittel" name="mean" rules={[{ required: true, message: "Pflichtfeld" }]}>
-          <InputNumber data-testid="entry-mean" min={c.min} max={c.max} step={1} suffix={c.unit} />
-        </Form.Item>
-        <Form.Item
-          label="Diastolisch"
-          name="diastolic"
-          rules={[{ required: true, message: "Pflichtfeld" }]}
-        >
-          <InputNumber data-testid="entry-diastolic" min={c.min} max={c.max} step={1} suffix={c.unit} />
-        </Form.Item>
-      </Space>
+      <div className="nibp-form-unit">Einheit: mmHg</div>
+      <Form.Item
+        label="Mittel"
+        name="mean"
+        dependencies={["systolic", "diastolic"]}
+        rules={[
+          { required: true, message: "Bitte einen Mittelwert eingeben." },
+          ({ getFieldValue }) => ({
+            validator: (_, value: number | null) => {
+              if (value === null || value === undefined) return Promise.resolve();
+              const systolic = getFieldValue("systolic") as number | null;
+              const diastolic = getFieldValue("diastolic") as number | null;
+              if (systolic !== null && systolic !== undefined && value > systolic) {
+                return Promise.reject(new Error("Mittel darf nicht über Systolisch liegen."));
+              }
+              if (diastolic !== null && diastolic !== undefined && value < diastolic) {
+                return Promise.reject(new Error("Mittel darf nicht unter Diastolisch liegen."));
+              }
+              return Promise.resolve();
+            },
+          }),
+        ]}
+      >
+        <InputNumber data-testid="entry-mean" min={c.min} max={c.max} step={1} style={{ width: "100%" }} autoFocus={!focusPart} />
+      </Form.Item>
+      {editing ? (
+        <div className="nibp-endpoint-fields">
+          <Form.Item
+            label="Systolisch"
+            name="systolic"
+            dependencies={["mean"]}
+            rules={[
+              ({ getFieldValue }) => ({
+                validator: (_, value: number | null) => {
+                  if (value === null || value === undefined) return Promise.resolve();
+                  return value >= Number(getFieldValue("mean"))
+                    ? Promise.resolve()
+                    : Promise.reject(new Error("Systolisch muss mindestens dem Mittelwert entsprechen."));
+                },
+              }),
+            ]}
+          >
+            <InputNumber
+              data-testid="entry-systolic"
+              min={c.min}
+              max={c.max}
+              step={1}
+              suffix="mmHg"
+              style={{ width: "100%" }}
+              autoFocus={focusPart === "systolic"}
+            />
+          </Form.Item>
+          <Form.Item
+            label="Diastolisch"
+            name="diastolic"
+            dependencies={["mean"]}
+            rules={[
+              ({ getFieldValue }) => ({
+                validator: (_, value: number | null) => {
+                  if (value === null || value === undefined) return Promise.resolve();
+                  return value <= Number(getFieldValue("mean"))
+                    ? Promise.resolve()
+                    : Promise.reject(new Error("Diastolisch darf den Mittelwert nicht überschreiten."));
+                },
+              }),
+            ]}
+          >
+            <InputNumber
+              data-testid="entry-diastolic"
+              min={c.min}
+              max={c.max}
+              step={1}
+              suffix="mmHg"
+              style={{ width: "100%" }}
+              autoFocus={focusPart === "diastolic"}
+            />
+          </Form.Item>
+        </div>
+      ) : null}
+      <p className="nibp-form-help">
+        {editing
+          ? "Werte direkt eingeben oder die weißen Griffe anschließend im Diagramm ziehen."
+          : "Nach dem Speichern erscheinen oberhalb und unterhalb des Mittelwerts Griffe für Systolisch und Diastolisch."}
+      </p>
       <FormActions onCancel={onCancel} />
     </Form>
   );
 }
+
+const TEMPERATURE_OPTIONS = Array.from({ length: 71 }, (_, index) => {
+  const value = Number((34 + index / 10).toFixed(1));
+  return { value, label: `${value.toFixed(1).replace(".", ",")} °C` };
+});
 
 function clockToTimestamp(startedAt: number, value: Dayjs, originalTime: number): number {
   const original = new Date(originalTime);

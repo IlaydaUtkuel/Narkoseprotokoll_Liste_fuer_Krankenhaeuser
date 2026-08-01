@@ -21,9 +21,9 @@ export interface ScalarMeasurement extends BaseMeasurement {
 // NiBP: drei Werte teilen sich denselben Zeitpunkt.
 export interface NibpMeasurement extends BaseMeasurement {
   kind: "nibp";
-  systolic: number;
+  systolic: number | null;
   mean: number;
-  diastolic: number;
+  diastolic: number | null;
 }
 
 export type Measurement = ScalarMeasurement | NibpMeasurement;

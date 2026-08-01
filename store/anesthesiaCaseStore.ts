@@ -23,9 +23,9 @@ export interface NewScalar {
 export interface NewNibp {
   kind: "nibp";
   time: number;
-  systolic: number;
+  systolic: number | null;
   mean: number;
-  diastolic: number;
+  diastolic: number | null;
 }
 export type NewMeasurement = NewScalar | NewNibp;
 
@@ -53,9 +53,9 @@ export interface CaseState {
   updateNibp: (
     id: string,
     time: number,
-    systolic: number,
+    systolic: number | null,
     mean: number,
-    diastolic: number,
+    diastolic: number | null,
   ) => void;
   removeMeasurement: (id: string) => void;
   addMedication: (input: NewMedication) => MedicationEntry;
@@ -66,6 +66,7 @@ export interface CaseState {
   removeInfusion: (id: string) => void;
   upsertEvent: (eventType: TimelineEventType, time: number) => TimelineEvent;
   updateEventTime: (id: string, time: number) => void;
+  updateEvent: (id: string, eventType: TimelineEventType, time: number) => void;
   removeEvent: (id: string) => void;
   resetCase: () => void;
 }
@@ -323,6 +324,16 @@ export const useCaseStore = create<CaseState>((set, get) => ({
       events: get().events.map((item) =>
         item.id === id ? { ...item, time, updatedAt: now } : item,
       ),
+    });
+    persist(get, set);
+  },
+
+  updateEvent: (id, eventType, time) => {
+    const now = Date.now();
+    set({
+      events: get().events
+        .filter((item) => item.id === id || item.eventType !== eventType)
+        .map((item) => item.id === id ? { ...item, eventType, time, updatedAt: now } : item),
     });
     persist(get, set);
   },

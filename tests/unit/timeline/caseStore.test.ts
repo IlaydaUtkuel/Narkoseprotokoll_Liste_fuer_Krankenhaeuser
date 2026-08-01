@@ -133,6 +133,24 @@ describe("anesthesiaCaseStore", () => {
     expect(useCaseStore.getState().infusions).toHaveLength(0);
   });
 
+  it("persistiert NiBP erst mit Mittelwert und danach mit gezogenen Endpunkten", () => {
+    useCaseStore.getState().startCase();
+    const time = useCaseStore.getState().startedAt!;
+    const measurement = useCaseStore.getState().addMeasurement({
+      kind: "nibp",
+      time,
+      systolic: null,
+      mean: 90,
+      diastolic: null,
+    });
+    expect(measurement).toMatchObject({ systolic: null, mean: 90, diastolic: null });
+    useCaseStore.getState().updateNibp(measurement.id, time, 125, 90, 68);
+    expect(loadCase()).toMatchObject({
+      status: "ok",
+      data: { measurements: [{ systolic: 125, mean: 90, diastolic: 68 }] },
+    });
+  });
+
   it("legt jedes Pflicht-Ereignis nur einmal an und persistiert Drag-Zeit", () => {
     useCaseStore.getState().startCase();
     const time = useCaseStore.getState().startedAt!;
@@ -144,5 +162,16 @@ describe("anesthesiaCaseStore", () => {
     expect(loadCase()).toMatchObject({ status: "ok", data: { events: [{ time: time + 2000 }] } });
     useCaseStore.getState().removeEvent(first.id);
     expect(useCaseStore.getState().events).toHaveLength(0);
+  });
+
+  it("ändert Ereignistyp und Zeit ohne einen zweiten gleichen Typ zu behalten", () => {
+    useCaseStore.getState().startCase();
+    const time = useCaseStore.getState().startedAt!;
+    const incision = useCaseStore.getState().upsertEvent("incision", time);
+    useCaseStore.getState().upsertEvent("suture", time + 1_000);
+    useCaseStore.getState().updateEvent(incision.id, "suture", time + 2_000);
+    expect(useCaseStore.getState().events).toEqual([
+      expect.objectContaining({ id: incision.id, eventType: "suture", time: time + 2_000 }),
+    ]);
   });
 });

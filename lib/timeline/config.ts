@@ -49,7 +49,7 @@ export const HIT_RADIUS_PX = {
 // Layout-Konstanten des gemeinsamen SVG.
 export const LAYOUT = {
   marginLeft: 176,
-  marginRight: 28,
+  marginRight: 32,
   marginTop: 16,
   axisHeight: 52,
   bandGap: 10,
@@ -63,5 +63,5 @@ export const LAYOUT = {
 
 // Persistenz.
 export const CASE_STORAGE_KEY = "sikant-anesthesia-demo-case:v1";
-export const CASE_SCHEMA_VERSION = 2;
+export const CASE_SCHEMA_VERSION = 3;
 export const CASE_ID = "demo-case-001";
