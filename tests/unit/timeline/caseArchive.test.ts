@@ -26,6 +26,7 @@ describe("caseArchive", () => {
       asaClass: "II",
       mallampatiClass: "I",
       allergies: "keine",
+      noKnownAllergies: false,
       updatedAt: new Date(START).toISOString(),
     });
     saveCase({

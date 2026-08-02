@@ -38,7 +38,10 @@ export function buildXScale(domain: TimelineDomain, layout: TimelineLayout): XSc
 export function buildYScale(kind: VitalKind, band: BandLayout, domain?: VitalScaleDomain): YScale {
   const c = domain ?? VITAL_CONFIG[kind];
   // Grosse Werte oben, kleine unten (Range invertiert).
-  return scaleLinear().domain([c.min, c.max]).range([band.innerBottom, band.innerTop]);
+  return scaleLinear()
+    .domain([c.min, c.max])
+    .range([band.innerBottom, band.innerTop])
+    .clamp(kind === "spo2");
 }
 
 export function buildYScales(

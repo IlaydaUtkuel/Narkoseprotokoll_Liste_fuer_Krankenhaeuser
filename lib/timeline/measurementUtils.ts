@@ -1,4 +1,4 @@
-import { NEAR_DUPLICATE_MS } from "./config";
+import { VITAL_CONFIG } from "./config";
 import type { Measurement, VitalKind } from "../../types/vitals";
 
 let fallbackCounter = 0;
@@ -24,7 +24,7 @@ export function findNearestSameKind(
   measurements: Measurement[],
   kind: VitalKind,
   time: number,
-  tolerance: number = NEAR_DUPLICATE_MS,
+  tolerance: number = 0,
 ): Measurement | null {
   let best: Measurement | null = null;
   let bestDist = Number.POSITIVE_INFINITY;
@@ -37,6 +37,15 @@ export function findNearestSameKind(
     }
   }
   return best;
+}
+
+export function normalizeVitalPointerValue(kind: VitalKind, value: number): number {
+  if (kind === "spo2") return Math.round(clampValue(value, 0, 100));
+  return roundToPrecision(value, VITAL_CONFIG[kind].precision);
+}
+
+export function isValidSpo2(value: number): boolean {
+  return Number.isFinite(value) && value >= 0 && value <= 100;
 }
 
 export function roundToPrecision(value: number, precision: number): number {

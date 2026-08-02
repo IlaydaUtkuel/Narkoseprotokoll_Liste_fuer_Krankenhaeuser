@@ -13,7 +13,7 @@ interface Props {
   xScale: XScale;
   selectedTime: number | null;
   onSelectTime: (time: number) => void;
-  onOpenBand: (kind: VitalKind, time: number) => void;
+  onOpenBand: (kind: VitalKind, time: number, clientY?: number) => void;
 }
 
 export function CheckpointWarningLayer({ warnings, layout, xScale, selectedTime, onSelectTime, onOpenBand }: Props) {
@@ -57,7 +57,7 @@ export function CheckpointWarningLayer({ warnings, layout, xScale, selectedTime,
                 aria-label={`${formatClock(warning.time)}: ${band.kind} nachtragen`}
                 data-testid={`checkpoint-band-${band.kind}-${warning.time}`}
                 className="checkpoint-band-hit"
-                onClick={(event) => { event.stopPropagation(); onOpenBand(band.kind, warning.time); }}
+                onClick={(event) => { event.stopPropagation(); onOpenBand(band.kind, warning.time, event.clientY); }}
                 onKeyDown={(event) => {
                   if (event.key === "Enter" || event.key === " ") {
                     event.preventDefault();

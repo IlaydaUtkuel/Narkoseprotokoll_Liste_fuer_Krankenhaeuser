@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { computeTimelineLayout } from "@/lib/timeline/geometry";
 import { buildXScale, buildYScales, computeDomain, timeToX } from "@/lib/timeline/scales";
 import { mapPointerToTimeline } from "@/lib/timeline/pointerMapping";
+import { normalizeVitalPointerValue } from "@/lib/timeline/measurementUtils";
 import type { VitalKind } from "@/types/vitals";
 
 const MIN = 60 * 1000;
@@ -108,5 +109,13 @@ describe("mapPointerToTimeline", () => {
     });
     expect(result.ok).toBe(true);
     if (result.ok) expect(result.value).toBe(37.3);
+  });
+
+  it("normalisiert Checkpoint-Y für Herzfrequenz, Temperatur, NIBP und SpO₂", () => {
+    expect(normalizeVitalPointerValue("heartRate", 114.6)).toBe(115);
+    expect(normalizeVitalPointerValue("temperature", 36.67)).toBe(36.7);
+    expect(normalizeVitalPointerValue("nibp", 91.6)).toBe(92);
+    expect(normalizeVitalPointerValue("spo2", 101.2)).toBe(100);
+    expect(normalizeVitalPointerValue("spo2", -2)).toBe(0);
   });
 });

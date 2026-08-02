@@ -3,6 +3,8 @@
 import { useId, useRef, useState } from "react";
 import { eventDefinition } from "../../lib/timeline/events";
 import { formatClock } from "../../lib/timeline/format";
+import { durationMinutesBetween, formatLocalDateTime } from "../../lib/timeline/therapyTime";
+import { placeTooltipAvoiding, type TooltipRect } from "../../lib/timeline/tooltipPlacement";
 import { clampValue } from "../../lib/timeline/measurementUtils";
 import { timeToX, xToTime, type XScale } from "../../lib/timeline/scales";
 import { displayEndTime } from "../../lib/timeline/therapyUtils";
@@ -31,11 +33,14 @@ interface SharedProps {
   endedAt: number | null;
 }
 
-export interface ActiveTherapyInterval {
+export type ActiveTherapyInterval =
+  | { kind: "medication"; entry: MedicationEntry; index: number; end: number }
+  | { kind: "infusion"; entry: InfusionEntry; index: number; end: number };
+
+export interface TherapyEndPlacement {
   kind: "medication" | "infusion";
-  entry: MedicationEntry | InfusionEntry;
-  index: number;
-  end: number;
+  id: string;
+  previewTime: number;
 }
 
 export function therapyIntervalsAtTime(
@@ -51,7 +56,7 @@ export function therapyIntervalsAtTime(
   ];
   return entries.flatMap((item) => {
     const end = displayEndTime(item.entry, now, endedAt);
-    return end !== null && time >= item.entry.startTime && time <= end ? [{ ...item, end }] : [];
+    return end !== null && time >= item.entry.startedAt && time <= end ? [{ ...item, end }] : [];
   });
 }
 
@@ -60,31 +65,48 @@ export function TherapyIntervalTooltip({
   x,
   y,
   layout,
+  avoidRect,
 }: {
   items: ActiveTherapyInterval[];
   x: number;
   y: number;
   layout: TimelineLayout;
+  avoidRect?: TooltipRect | null;
 }) {
   if (items.length === 0) return null;
-  const width = 260;
-  const height = 12 + items.length * 31;
-  const tooltipX = x > layout.plotRight - width - 10 ? x - width - 10 : x + 10;
-  const tooltipY = clampValue(y - height - 8, layout.plotTop + 3, layout.plotBottom - height - 3);
+  const width = 308;
+  const height = 12 + items.length * 102;
+  const placed = placeTooltipAvoiding(
+    { x, y },
+    { width, height },
+    { left: layout.plotLeft + 3, top: layout.plotTop + 3, right: layout.plotRight - 3, bottom: layout.plotBottom - 3 },
+    avoidRect,
+  );
   return (
     <g pointerEvents="none" data-testid="therapy-interval-tooltip">
-      <rect x={tooltipX} y={tooltipY} width={width} height={height} rx={7} className="therapy-interval-tooltip" />
+      <rect x={placed.x} y={placed.y} width={width} height={height} rx={7} className="therapy-interval-tooltip" />
       {items.map((item, index) => {
         const visual = therapyVisual(item.kind, item.index);
         const label = item.kind === "medication" ? "Medikament" : "Infusion / Flüssigkeit";
-        const rowY = tooltipY + 18 + index * 31;
+        const rowY = placed.y + 9 + index * 102;
+        const amount = item.kind === "medication"
+          ? `${item.entry.dose} ${item.entry.unit.label}`
+          : `${item.entry.amount} ${item.entry.unit.label}`;
+        const concentration = item.entry.concentration
+          ? `${item.entry.concentration.value} ${item.entry.concentration.unit.label}`
+          : null;
         return (
           <g key={`${item.kind}-${item.entry.id}`}>
-            <line x1={tooltipX + 9} y1={rowY - 4} x2={tooltipX + 25} y2={rowY - 4} stroke={visual.color} strokeWidth={visual.strokeWidth + 1} strokeDasharray={visual.dasharray} />
-            <text x={tooltipX + 31} y={rowY} className="therapy-interval-tooltip__name">{item.entry.name} · {label}</text>
-            <text x={tooltipX + 31} y={rowY + 13} className="therapy-interval-tooltip__time">
-              {formatClock(item.entry.startTime)}–{formatClock(item.end)}
-            </text>
+            <line x1={placed.x + 9} y1={rowY + 7} x2={placed.x + 25} y2={rowY + 7} stroke={visual.color} strokeWidth={visual.strokeWidth + 1} strokeDasharray={visual.dasharray} />
+            <foreignObject x={placed.x + 31} y={rowY} width={width - 40} height={94}>
+              <div className="therapy-tooltip-content">
+                <strong>{item.entry.name}</strong>
+                <span>{label} · {amount}</span>
+                <span>Beginn: {formatLocalDateTime(item.entry.startedAt)}</span>
+                <span>Ende: {item.entry.ongoing ? "Läuft weiter" : formatLocalDateTime(item.end)}</span>
+                <span>Dauer: {Math.round(durationMinutesBetween(item.entry.startedAt, item.end))} Minuten{concentration ? ` · Konzentration: ${concentration}` : ""}</span>
+              </div>
+            </foreignObject>
           </g>
         );
       })}
@@ -153,8 +175,8 @@ export function TherapyDurationLayer({
       </defs>
       {entries.map(({ entry, kind }) => {
         const end = displayEndTime(entry, now, endedAt);
-        if (end === null || end <= entry.startTime) return null;
-        const x1 = Math.max(layout.plotLeft, timeToX(xScale, entry.startTime));
+        if (end === null || end <= entry.startedAt) return null;
+        const x1 = Math.max(layout.plotLeft, timeToX(xScale, entry.startedAt));
         const x2 = Math.min(layout.plotRight, timeToX(xScale, end));
         const patternId = `${baseId}_${kind}_${entry.id}`;
         return (
@@ -180,8 +202,6 @@ export function TherapyDurationLayer({
 export function TherapyMarkerLayer({
   layout,
   xScale,
-  now,
-  endedAt,
   medications,
   infusions,
   events,
@@ -192,6 +212,11 @@ export function TherapyMarkerLayer({
   onEditInfusion,
   onEditEvent,
   onCommitEventTime,
+  selectedEnd,
+  onSelectEnd,
+  onPreviewEnd,
+  onCommitEnd,
+  onCancelEnd,
 }: {
   layout: TimelineLayout;
   xScale: XScale;
@@ -207,6 +232,11 @@ export function TherapyMarkerLayer({
   onEditInfusion: (entry: InfusionEntry) => void;
   onEditEvent: (entry: TimelineEvent) => void;
   onCommitEventTime: (id: string, time: number) => void;
+  selectedEnd: TherapyEndPlacement | null;
+  onSelectEnd: (kind: "medication" | "infusion", entry: MedicationEntry | InfusionEntry) => void;
+  onPreviewEnd: (time: number) => void;
+  onCommitEnd: (time: number) => void;
+  onCancelEnd: () => void;
 }) {
   const medicationLane = layout.therapyLanes[0];
   const infusionLane = layout.therapyLanes[1];
@@ -216,33 +246,51 @@ export function TherapyMarkerLayer({
       {medications.map((entry, index) => (
         <TherapyMarker
           key={entry.id}
-          x={timeToX(xScale, entry.startTime)}
+          x={timeToX(xScale, entry.startedAt)}
           laneTop={medicationLane.top}
           plotBottom={layout.plotBottom}
           plotRight={layout.plotRight}
-          label={`${entry.name} · ${entry.dose} ${entry.unit}`}
-          time={entry.startTime}
+          label={`${entry.name} · ${entry.dose} ${entry.unit.label}`}
+          time={entry.startedAt}
           className="medication"
           testId={`medication-${entry.id}`}
           markerIndex={index}
-          endX={durationEndX(entry, xScale, now, endedAt, layout.plotRight)}
           onEdit={() => onEditMedication(entry)}
+          entry={entry}
+          xScale={xScale}
+          plotLeft={layout.plotLeft}
+          maxTime={maxTime}
+          getSvgRect={getSvgRect}
+          selectedEnd={selectedEnd?.kind === "medication" && selectedEnd.id === entry.id ? selectedEnd : null}
+          onSelectEnd={() => onSelectEnd("medication", entry)}
+          onPreviewEnd={onPreviewEnd}
+          onCommitEnd={onCommitEnd}
+          onCancelEnd={onCancelEnd}
         />
       ))}
       {infusions.map((entry, index) => (
         <TherapyMarker
           key={entry.id}
-          x={timeToX(xScale, entry.startTime)}
+          x={timeToX(xScale, entry.startedAt)}
           laneTop={infusionLane.top}
           plotBottom={layout.plotBottom}
           plotRight={layout.plotRight}
-          label={`${entry.name} · ${entry.amount} ${entry.unit}`}
-          time={entry.startTime}
+          label={`${entry.name} · ${entry.amount} ${entry.unit.label}`}
+          time={entry.startedAt}
           className="infusion"
           testId={`infusion-${entry.id}`}
           markerIndex={index}
-          endX={durationEndX(entry, xScale, now, endedAt, layout.plotRight)}
           onEdit={() => onEditInfusion(entry)}
+          entry={entry}
+          xScale={xScale}
+          plotLeft={layout.plotLeft}
+          maxTime={maxTime}
+          getSvgRect={getSvgRect}
+          selectedEnd={selectedEnd?.kind === "infusion" && selectedEnd.id === entry.id ? selectedEnd : null}
+          onSelectEnd={() => onSelectEnd("infusion", entry)}
+          onPreviewEnd={onPreviewEnd}
+          onCommitEnd={onCommitEnd}
+          onCancelEnd={onCancelEnd}
         />
       ))}
       {events.map((entry, index) => (
@@ -276,8 +324,17 @@ function TherapyMarker({
   className,
   testId,
   markerIndex,
-  endX,
   onEdit,
+  entry,
+  xScale,
+  plotLeft,
+  maxTime,
+  getSvgRect,
+  selectedEnd,
+  onSelectEnd,
+  onPreviewEnd,
+  onCommitEnd,
+  onCancelEnd,
 }: {
   x: number;
   laneTop: number;
@@ -288,14 +345,59 @@ function TherapyMarker({
   className: "medication" | "infusion";
   testId: string;
   markerIndex: number;
-  endX: number | null;
   onEdit: () => void;
+  entry: MedicationEntry | InfusionEntry;
+  xScale: XScale;
+  plotLeft: number;
+  maxTime: number;
+  getSvgRect: () => DOMRect | null;
+  selectedEnd: TherapyEndPlacement | null;
+  onSelectEnd: () => void;
+  onPreviewEnd: (time: number) => void;
+  onCommitEnd: (time: number) => void;
+  onCancelEnd: () => void;
 }) {
   const markerY = laneTop + 25 + (markerIndex % 3) * 25;
   const visual = therapyVisual(className, markerIndex);
   const nearRight = x > plotRight - 190;
   const textX = nearRight ? x - 8 : x + 8;
   const textAnchor = nearRight ? "end" : "start";
+  const dragTimeRef = useRef<number | null>(null);
+  const explicitEnd = entry.endedAt;
+  const shownEnd = selectedEnd?.previewTime ?? explicitEnd;
+  const endX = shownEnd === null ? null : Math.min(plotRight, timeToX(xScale, shownEnd));
+  const mapEnd = (clientX: number) => {
+    const rect = getSvgRect();
+    if (!rect) return null;
+    const mapped = Math.round(clampValue(xToTime(xScale, clampValue(clientX - rect.left, plotLeft, plotRight)), entry.startedAt + 1_000, maxTime));
+    dragTimeRef.current = mapped;
+    onPreviewEnd(mapped);
+    return mapped;
+  };
+  const endGesture = usePointerGesture({
+    capture: true,
+    threshold: 7,
+    onTap: () => onSelectEnd(),
+    onDragStart: (event) => {
+      onSelectEnd();
+      mapEnd(event.clientX);
+    },
+    onDragMove: (event) => mapEnd(event.clientX),
+    onDragEnd: () => {
+      if (dragTimeRef.current !== null) onCommitEnd(dragTimeRef.current);
+      dragTimeRef.current = null;
+    },
+    onCancel: () => {
+      dragTimeRef.current = null;
+      onCancelEnd();
+    },
+  });
+  const adjustKeyboard = (deltaMinutes: number) => {
+    const base = selectedEnd?.previewTime ?? explicitEnd ?? maxTime;
+    const next = clampValue(base + deltaMinutes * 60_000, entry.startedAt + 1_000, maxTime);
+    if (!selectedEnd) onSelectEnd();
+    onPreviewEnd(next);
+  };
   return (
     <>
       <line x1={x} y1={laneTop} x2={x} y2={plotBottom} className="therapy-start-line" stroke={visual.color} strokeWidth={visual.strokeWidth} strokeDasharray={visual.dasharray ?? "4 3"} pointerEvents="none" />
@@ -325,19 +427,73 @@ function TherapyMarker({
         <text x={textX} y={markerY - 2} textAnchor={textAnchor} className="therapy-marker-label">{label}</text>
         <text x={textX} y={markerY + 11} textAnchor={textAnchor} className="therapy-marker-time">{formatClock(time)}</text>
       </g>
+      {entry.ongoing && !selectedEnd ? (
+        <g
+          role="button"
+          tabIndex={0}
+          aria-label={`Anwendung ${entry.name} beenden`}
+          className="therapy-stop-action"
+          data-testid={`${testId}-stop-action`}
+          onClick={(event) => { event.stopPropagation(); onSelectEnd(); }}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" || event.key === " ") {
+              event.preventDefault();
+              onSelectEnd();
+            }
+          }}
+        >
+          <rect x={Math.min(plotRight - 126, Math.max(x + 8, timeToX(xScale, maxTime) - 126))} y={markerY + 15} width={126} height={22} rx={5} />
+          <text x={Math.min(plotRight - 118, Math.max(x + 16, timeToX(xScale, maxTime) - 118))} y={markerY + 30}>Anwendung beenden</text>
+        </g>
+      ) : endX !== null ? (
+        <g data-testid={`${testId}-end-handle`}>
+          <circle cx={endX} cy={markerY} r={selectedEnd ? 10 : 7} fill="#fff" stroke={visual.color} strokeWidth={selectedEnd ? 3 : 2.25} pointerEvents="none" />
+          <circle
+            cx={endX}
+            cy={markerY}
+            r={14}
+            fill="transparent"
+            role="button"
+            tabIndex={0}
+            aria-label={`Endzeit von ${entry.name} ändern`}
+            className={`therapy-end-handle ${selectedEnd ? "therapy-end-handle--selected" : ""}`}
+            data-testid={`${testId}-end-hit`}
+            style={{ touchAction: "none", cursor: "ew-resize" }}
+            onClick={(event) => {
+              event.stopPropagation();
+              if (!selectedEnd) onSelectEnd();
+            }}
+            onKeyDown={(event) => {
+              if (event.key === "Escape") {
+                event.preventDefault();
+                onCancelEnd();
+                return;
+              }
+              if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
+                event.preventDefault();
+                const direction = event.key === "ArrowLeft" ? -1 : 1;
+                adjustKeyboard(direction * (event.shiftKey ? 5 : 1));
+                return;
+              }
+              if (event.key === "Enter" || event.key === " ") {
+                event.preventDefault();
+                if (selectedEnd) onCommitEnd(selectedEnd.previewTime);
+                else onSelectEnd();
+              }
+            }}
+            {...endGesture}
+          />
+          {selectedEnd ? (
+            <g pointerEvents="none" data-testid="therapy-end-preview">
+              <rect x={Math.max(plotLeft, Math.min(endX + 9, plotRight - 202))} y={markerY + 13} width={194} height={38} rx={5} className="event-drag-tooltip" />
+              <text x={Math.max(plotLeft, Math.min(endX + 9, plotRight - 202)) + 7} y={markerY + 28} className="event-drag-tooltip-text">Neue Endzeit</text>
+              <text x={Math.max(plotLeft, Math.min(endX + 9, plotRight - 202)) + 7} y={markerY + 43} className="event-drag-tooltip-text">{formatLocalDateTime(selectedEnd.previewTime)}</text>
+            </g>
+          ) : null}
+        </g>
+      ) : null}
     </>
   );
-}
-
-function durationEndX(
-  entry: MedicationEntry | InfusionEntry,
-  xScale: XScale,
-  now: number,
-  endedAt: number | null,
-  plotRight: number,
-): number | null {
-  const end = displayEndTime(entry, now, endedAt);
-  return end !== null && end > entry.startTime ? Math.min(plotRight, timeToX(xScale, end)) : null;
 }
 
 function DraggableEventMarker({

@@ -98,6 +98,13 @@ export function toDeDate(value: Dayjs): string {
   return value.format(DATE_FORMAT);
 }
 
+/** Lokales Kalenderdatum ohne UTC-Konvertierung (verhindert Tagesverschiebungen). */
+export function localTodayDeDate(now: Date = new Date()): string {
+  const day = String(now.getDate()).padStart(2, "0");
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+  return `${day}.${month}.${now.getFullYear()}`;
+}
+
 /**
  * Migriert einen gespeicherten Datumswert in das sichtbare Raw-Format "TT.MM.JJJJ".
  * Unterstuetzt Alt-Werte im ISO-Format "YYYY-MM-DD" und bewahrt Teilangaben.

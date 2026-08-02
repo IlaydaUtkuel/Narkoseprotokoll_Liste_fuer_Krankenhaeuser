@@ -415,6 +415,46 @@ body {
   font-weight: 600;
 }
 
+.therapy-tooltip-content {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  overflow: hidden;
+  color: #d9eee7;
+  font: 600 10px/1.25 system-ui, sans-serif;
+  overflow-wrap: anywhere;
+}
+
+.therapy-tooltip-content strong {
+  color: #fff;
+  font-size: 11px;
+  line-height: 1.25;
+  max-height: 2.5em;
+  overflow: hidden;
+}
+
+.therapy-end-handle:focus-visible,
+.therapy-end-handle--selected {
+  outline: 3px solid rgba(22, 119, 255, 0.45);
+  outline-offset: 2px;
+}
+
+.therapy-stop-action rect {
+  fill: #fff;
+  stroke: #7a938b;
+}
+
+.therapy-stop-action text {
+  fill: #24463c;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.therapy-stop-action:focus-visible {
+  outline: 2px solid #1f7a63;
+  outline-offset: 2px;
+}
+
 .nibp-handle {
   fill: #ffffff;
   stroke: var(--vital-nibp-dark);
@@ -548,6 +588,28 @@ body {
 .therapy-form-shell {
   max-width: 720px;
   margin: 0 auto;
+}
+
+.therapy-end-section {
+  margin: 8px 0 18px;
+  padding: 12px;
+  border: 1px solid #dbe7e2;
+  border-radius: 10px;
+  background: #fbfdfc;
+}
+
+.therapy-end-preview {
+  margin: 3px 0 12px;
+  padding: 8px 10px;
+  border-left: 3px solid #1f7a63;
+  background: #eef7f3;
+  color: #24463c;
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.therapy-end-error {
+  color: #a8071a;
 }
 
 .event-form-name {

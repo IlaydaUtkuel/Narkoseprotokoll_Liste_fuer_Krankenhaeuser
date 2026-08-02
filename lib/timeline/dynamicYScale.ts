@@ -20,6 +20,9 @@ function decimalsFor(step: number): number {
 }
 
 export function scaleDomainForValues(kind: VitalKind, values: number[]): VitalScaleDomain {
+  if (kind === "spo2") {
+    return { min: 0, max: 100, ticks: [0, 20, 40, 60, 80, 100] };
+  }
   const finite = values.filter(Number.isFinite);
   const fallback = VITAL_CONFIG[kind];
   if (finite.length === 0) {

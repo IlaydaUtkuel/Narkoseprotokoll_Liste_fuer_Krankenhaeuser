@@ -20,6 +20,7 @@ describe("parsePatientData", () => {
       asaClass: "III",
       mallampatiClass: "I",
       allergies: "Penicillin",
+      noKnownAllergies: false,
       updatedAt: "2026-06-01T08:00:00.000Z",
     };
     expect(parsePatientData(input)).toEqual(input);
@@ -64,6 +65,7 @@ describe("parsePatientData", () => {
     expect(result?.asaClass).toBeNull();
     expect(result?.mallampatiClass).toBe("II");
     expect(result?.allergies).toBe("");
+    expect(result?.noKnownAllergies).toBe(false);
     expect(result?.updatedAt).toBeNull();
   });
 });

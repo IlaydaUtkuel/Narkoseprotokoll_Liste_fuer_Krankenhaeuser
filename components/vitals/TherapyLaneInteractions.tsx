@@ -35,6 +35,8 @@ interface Props {
   onPlaceEvent: (eventType: TimelineEventType, time: number) => void;
   onInvalid: (error: TimelineTimeError) => void;
   onMissingEvent: () => void;
+  activeEndPlacement: boolean;
+  onPlaceTherapyEnd: (time: number) => void;
 }
 
 export function TherapyLaneInteractionLayer(props: Props) {
@@ -68,6 +70,8 @@ function LaneTarget({
   onPlaceEvent,
   onInvalid,
   onMissingEvent,
+  activeEndPlacement,
+  onPlaceTherapyEnd,
 }: Props & { kind: TherapyLaneKind; lane: TimelineLayout["therapyLanes"][number] }) {
   const latest = useRef<LanePlacementPreview | null>(null);
   const mapEvent = (event: ReactPointerEvent<SVGRectElement>) => {
@@ -94,6 +98,10 @@ function LaneTarget({
       onInvalid(mapped.error);
       return;
     }
+    if (activeEndPlacement) {
+      onPlaceTherapyEnd(mapped.time);
+      return;
+    }
     if (kind === "event" && !selectedEvent) {
       onMissingEvent();
       return;
@@ -115,7 +123,7 @@ function LaneTarget({
       role="button"
       tabIndex={0}
       className="therapy-lane-hit"
-      style={{ touchAction: "pan-y", cursor: kind === "event" && !selectedEvent ? "default" : "crosshair" }}
+      style={{ touchAction: "pan-y", cursor: activeEndPlacement ? "ew-resize" : kind === "event" && !selectedEvent ? "default" : "crosshair" }}
       onPointerMove={(event) => {
         gesture.onPointerMove(event);
         if (event.pointerType === "mouse" || event.pointerType === "pen") {
@@ -126,6 +134,7 @@ function LaneTarget({
       onPointerLeave={() => onPreview(null)}
       onFocus={() => {
         const time = endedAt ?? now;
+        if (activeEndPlacement) return;
         onPreview(kind === "event" && !selectedEvent ? null : { kind, time, x: timeToX(xScale, time), error: null, ...(kind === "event" && selectedEvent ? { eventType: selectedEvent } : {}) });
       }}
       onBlur={() => onPreview(null)}
@@ -133,6 +142,10 @@ function LaneTarget({
         if (event.key !== "Enter" && event.key !== " ") return;
         event.preventDefault();
         const time = endedAt ?? now;
+        if (activeEndPlacement) {
+          onPlaceTherapyEnd(time);
+          return;
+        }
         if (kind === "medication") onCreateMedication(time);
         if (kind === "infusion") onCreateInfusion(time);
         if (kind === "event" && selectedEvent) onPlaceEvent(selectedEvent, time);

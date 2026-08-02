@@ -63,7 +63,7 @@ export const MALLAMPATI_OPTIONS = [
 
 // Beschriftungen exakt in der geforderten Reihenfolge.
 export const FIELD_LABELS: Record<PatientField, string> = {
-  patientName: "Patient/-in:",
+  patientName: "Patient/-in (Vorname, Nachname):",
   birthDate: "Geburtsdatum:",
   procedure: "Eingriff:",
   operationDate: "OP-Datum:",
@@ -100,6 +100,7 @@ export function createEmptyPatientData(): PatientBaseData {
     asaClass: null,
     mallampatiClass: null,
     allergies: "",
+    noKnownAllergies: false,
     updatedAt: null,
   };
 }

@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
-import { Button, Input, InputNumber, Select } from "antd";
+import { Button, Input, InputNumber, Modal, Select } from "antd";
 import { AutosaveFieldStatus } from "./AutosaveFieldStatus";
 import { DateField } from "./DateField";
 import { GlobalSaveStatus } from "./GlobalSaveStatus";
@@ -26,6 +26,7 @@ import {
 import {
   isBirthDateDisabled,
   isOpDateDisabled,
+  localTodayDeDate,
   validateBirthDate,
   validateOpDate,
 } from "../lib/date-utils";
@@ -36,6 +37,7 @@ import type {
   WeightUnit,
 } from "../types/patient";
 import styles from "./PatientBaseDataForm.module.css";
+import { noKnownAllergiesPatch } from "../lib/allergy-toggle";
 
 function hasValue(value: unknown): boolean {
   return value !== null && value !== undefined && value !== "";
@@ -164,6 +166,30 @@ export function PatientBaseDataForm() {
     resetStatuses();
   }, [resetStatuses]);
 
+  const enableNoKnownAllergies = useCallback(() => {
+    const patch = noKnownAllergiesPatch(dataRef.current, true);
+    if (patch) applyChange(patch, "allergies");
+  }, [applyChange]);
+
+  const toggleNoKnownAllergies = useCallback(() => {
+    if (dataRef.current.noKnownAllergies) {
+      const patch = noKnownAllergiesPatch(dataRef.current, false);
+      if (patch) applyChange(patch, "allergies");
+      return;
+    }
+    if (dataRef.current.allergies.trim()) {
+      Modal.confirm({
+        title: "Allergien entfernen?",
+        content: "Die bereits eingetragenen Allergien werden entfernt. Möchten Sie fortfahren?",
+        okText: "Fortfahren",
+        cancelText: "Abbrechen",
+        onOk: enableNoKnownAllergies,
+      });
+      return;
+    }
+    enableNoKnownAllergies();
+  }, [applyChange, enableNoKnownAllergies]);
+
   const birthError = validateBirthDate(data.birthDate);
   const opError = validateOpDate(data.operationDate);
 
@@ -212,15 +238,23 @@ export function PatientBaseDataForm() {
           status={statuses.operationDate}
           error={opError}
         >
-          <DateField
-            id="operationDate"
-            testId="input-operationDate"
-            value={data.operationDate}
-            onChange={(raw) => handleChange("operationDate", raw)}
-            disabledDate={isOpDateDisabled}
-            ariaInvalid={Boolean(opError)}
-            showTodayShortcut
-          />
+          <div className={styles.dateWithAction}>
+            <DateField
+              id="operationDate"
+              testId="input-operationDate"
+              value={data.operationDate}
+              onChange={(raw) => handleChange("operationDate", raw)}
+              disabledDate={isOpDateDisabled}
+              ariaInvalid={Boolean(opError)}
+              showTodayShortcut
+            />
+            <Button
+              data-testid="operation-date-today"
+              onClick={() => handleChange("operationDate", localTodayDeDate())}
+            >
+              Heute
+            </Button>
+          </div>
         </Field>
 
         <Field name="bodyWeightKg" htmlFor="bodyWeightKg" status={statuses.bodyWeightKg}>
@@ -286,14 +320,28 @@ export function PatientBaseDataForm() {
         </Field>
 
         <Field name="allergies" htmlFor="allergies" status={statuses.allergies}>
-          <Input.TextArea
-            id="allergies"
-            data-testid="input-allergies"
-            value={data.allergies}
-            onChange={(e) => handleChange("allergies", e.target.value)}
-            placeholder="z. B. keine bekannt"
-            autoSize={{ minRows: 3, maxRows: 6 }}
-          />
+          <div className={styles.allergyControl}>
+            <Input.TextArea
+              id="allergies"
+              data-testid="input-allergies"
+              value={data.allergies}
+              onChange={(e) => handleChange("allergies", e.target.value)}
+              placeholder="z. B. Penicillin"
+              autoSize={{ minRows: 3, maxRows: 6 }}
+              disabled={data.noKnownAllergies}
+            />
+            <button
+              type="button"
+              className={`${styles.noAllergiesButton} ${data.noKnownAllergies ? styles.noAllergiesButtonActive : ""}`}
+              aria-label="Keine Allergien bekannt"
+              aria-pressed={data.noKnownAllergies}
+              data-testid="no-known-allergies"
+              onClick={toggleNoKnownAllergies}
+            >
+              <span aria-hidden>{data.noKnownAllergies ? "✓" : "○"}</span>
+              Keine
+            </button>
+          </div>
         </Field>
       </div>
 

@@ -107,6 +107,28 @@ describe("casePersistence", () => {
     expect(partial?.measurements[0]).toMatchObject({ systolic: null, mean: 88, diastolic: null });
   });
 
+  it("migriert Alt-Therapien mit Uhrzeit über Mitternacht und freien Einheiten", () => {
+    const caseStart = new Date(2026, 7, 1, 23, 30, 0).getTime();
+    const migrated = parseCase({
+      schemaVersion: 3,
+      caseId: CASE_ID,
+      startedAt: caseStart,
+      endedAt: null,
+      measurements: [],
+      medications: [{
+        id: "legacy-med", kind: "medication", administrationType: "continuous", name: "Alt",
+        startTime: "23:45", dose: 1, unit: "Spezial", durationMinutes: null, endTime: "00:32", ongoing: false,
+      }],
+      infusions: [], events: [], lastSavedAt: caseStart,
+    });
+    expect(migrated?.medications[0]).toMatchObject({
+      unit: { label: "Spezial", system: "custom", isCustom: true },
+      ongoing: false,
+    });
+    expect(new Date(migrated!.medications[0].endedAt!).getDate()).toBe(2);
+    expect(migrated!.medications[0].endedAt! - migrated!.medications[0].startedAt).toBe(47 * 60_000);
+  });
+
   it("parseCase lehnt unvollstaendige Messungen ab", () => {
     expect(
       parseCase({ schemaVersion: CASE_SCHEMA_VERSION, measurements: [{ id: "x", kind: "spo2", time: START }] }),

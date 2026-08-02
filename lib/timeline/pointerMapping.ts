@@ -1,7 +1,7 @@
-import { NOW_SNAP_PX, VITAL_CONFIG } from "./config";
+import { NOW_SNAP_PX } from "./config";
 import { bandAtY, type TimelineLayout } from "./geometry";
 import { timeToX, xToTime, type XScale, type YScale } from "./scales";
-import { clampValue, roundToPrecision } from "./measurementUtils";
+import { clampValue, normalizeVitalPointerValue } from "./measurementUtils";
 import type { VitalKind } from "../../types/vitals";
 
 export interface PointerMapInput {
@@ -55,10 +55,9 @@ export function mapPointerToTimeline(input: PointerMapInput): PointerMapResult {
   let time = xToTime(xScale, svgX);
   if (Math.abs(svgX - timeToX(xScale, now)) <= NOW_SNAP_PX) time = now;
 
-  const c = VITAL_CONFIG[band.kind];
   const raw = yScales[band.kind].invert(svgY);
   const [domainMin, domainMax] = yScales[band.kind].domain();
-  const pointerValue = roundToPrecision(clampValue(raw, domainMin, domainMax), c.precision);
+  const pointerValue = normalizeVitalPointerValue(band.kind, clampValue(raw, domainMin, domainMax));
   const mapped = {
     kind: band.kind,
     time,

@@ -18,6 +18,7 @@ const validData: PatientBaseData = {
   asaClass: "II",
   mallampatiClass: "II",
   allergies: "Keine bekannt",
+  noKnownAllergies: false,
   updatedAt: "2026-06-01T10:00:00.000Z",
 };
 

@@ -44,7 +44,13 @@ export function parsePatientData(raw: unknown): PatientBaseData | null {
     weightUnit: isWeightUnit(o.weightUnit) ? o.weightUnit : "kg",
     asaClass: isAsaValue(o.asaClass) ? o.asaClass : null,
     mallampatiClass: isAsaValue(o.mallampatiClass) ? o.mallampatiClass : null,
-    allergies: typeof o.allergies === "string" ? o.allergies : base.allergies,
+    allergies:
+      o.noKnownAllergies === true
+        ? "Keine Allergien bekannt"
+        : typeof o.allergies === "string"
+          ? o.allergies
+          : base.allergies,
+    noKnownAllergies: o.noKnownAllergies === true,
     updatedAt: typeof o.updatedAt === "string" ? o.updatedAt : null,
   };
 }

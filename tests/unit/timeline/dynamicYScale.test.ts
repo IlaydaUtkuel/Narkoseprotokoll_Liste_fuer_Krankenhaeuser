@@ -24,4 +24,12 @@ describe("dynamische Y-Skalierung", () => {
     expect(domain.min).toBeLessThan(-20);
     expect(domain.max).toBeGreaterThan(500);
   });
+
+  it("hält SpO₂ unabhängig von Messwerten immer bei 0–100", () => {
+    expect(scaleDomainForValues("spo2", [-10, 150])).toEqual({
+      min: 0,
+      max: 100,
+      ticks: [0, 20, 40, 60, 80, 100],
+    });
+  });
 });

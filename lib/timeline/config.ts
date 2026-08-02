@@ -63,5 +63,5 @@ export const LAYOUT = {
 
 // Persistenz.
 export const CASE_STORAGE_KEY = "sikant-anesthesia-demo-case:v1";
-export const CASE_SCHEMA_VERSION = 3;
+export const CASE_SCHEMA_VERSION = 4;
 export const CASE_ID = "demo-case-001";

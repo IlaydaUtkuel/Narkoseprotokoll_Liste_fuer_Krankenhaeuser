@@ -31,17 +31,32 @@ export type Measurement = ScalarMeasurement | NibpMeasurement;
 export type SaveStatus = "idle" | "saving" | "saved" | "error";
 
 export type MedicationAdministrationType = "bolus" | "continuous";
+export type TherapyEndMode = "duration" | "end" | "ongoing";
+
+export type TherapyUnitSystem = "UCUM" | "clinical-count" | "custom";
+
+export interface TherapyUnit {
+  label: string;
+  code: string;
+  system: TherapyUnitSystem;
+  isCustom: boolean;
+}
+
+export interface TherapyConcentration {
+  value: number;
+  unit: TherapyUnit;
+}
 
 export interface MedicationEntry {
   id: string;
   kind: "medication";
   administrationType: MedicationAdministrationType;
   name: string;
-  startTime: number;
+  startedAt: number;
   dose: number;
-  unit: string;
-  durationMinutes: number | null;
-  endTime: number | null;
+  unit: TherapyUnit;
+  concentration: TherapyConcentration | null;
+  endedAt: number | null;
   ongoing: boolean;
   createdAt: number;
   updatedAt: number;
@@ -51,11 +66,11 @@ export interface InfusionEntry {
   id: string;
   kind: "infusion";
   name: string;
-  startTime: number;
+  startedAt: number;
   amount: number;
-  unit: string;
-  durationMinutes: number | null;
-  endTime: number | null;
+  unit: TherapyUnit;
+  concentration: TherapyConcentration | null;
+  endedAt: number | null;
   ongoing: boolean;
   createdAt: number;
   updatedAt: number;

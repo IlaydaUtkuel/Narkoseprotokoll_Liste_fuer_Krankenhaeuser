@@ -83,13 +83,13 @@ export function CaseTimelinePreview({ caseData }: { caseData: PersistedCase }) {
           })}
         </g>
         {[...caseData.medications.map((entry, index) => ({ entry, index, kind: "medication" as const, lane: layout.therapyLanes[0] })), ...caseData.infusions.map((entry, index) => ({ entry, index, kind: "infusion" as const, lane: layout.therapyLanes[1] }))].map(({ entry, index, kind, lane }) => {
-          const x = timeToX(xScale, entry.startTime);
+          const x = timeToX(xScale, entry.startedAt);
           const visual = therapyVisual(kind, index);
           return <g key={entry.id} data-testid={`preview-${kind}-${entry.id}`}>
             <line x1={x} y1={lane.top} x2={x} y2={layout.plotBottom} stroke={visual.color} strokeWidth={visual.strokeWidth} strokeDasharray={visual.dasharray ?? "4 3"} />
             <circle cx={x} cy={lane.top + 25 + (index % 3) * 25} r={5} fill={visual.color} />
             <text x={x + 7} y={lane.top + 23 + (index % 3) * 25} className="therapy-marker-label">{entry.name}</text>
-            <text x={x + 7} y={lane.top + 36 + (index % 3) * 25} className="therapy-marker-time">{formatClock(entry.startTime)}</text>
+            <text x={x + 7} y={lane.top + 36 + (index % 3) * 25} className="therapy-marker-time">{formatClock(entry.startedAt)}</text>
           </g>;
         })}
         {caseData.events.map((entry, index) => {

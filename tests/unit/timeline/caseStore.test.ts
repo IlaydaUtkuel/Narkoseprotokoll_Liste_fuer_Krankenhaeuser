@@ -99,31 +99,31 @@ describe("anesthesiaCaseStore", () => {
     const medication = useCaseStore.getState().addMedication({
       administrationType: "bolus",
       name: "Demo",
-      startTime: time,
+      startedAt: time,
       dose: 1,
-      unit: "mg",
-      durationMinutes: 20,
-      endTime: null,
+      unit: { label: "mg", code: "mg", system: "UCUM", isCustom: false },
+      concentration: null,
+      endedAt: time + 20 * 60_000,
       ongoing: false,
     });
     useCaseStore.getState().updateMedication(medication.id, {
       administrationType: "continuous",
       name: "Demo kontinuierlich",
-      startTime: time,
+      startedAt: time,
       dose: 2,
-      unit: "mg/h",
-      durationMinutes: null,
-      endTime: null,
+      unit: { label: "mg/h", code: "mg/h", system: "UCUM", isCustom: false },
+      concentration: null,
+      endedAt: null,
       ongoing: true,
     });
     expect(useCaseStore.getState().medications[0]).toMatchObject({ administrationType: "continuous", ongoing: true });
     const infusion = useCaseStore.getState().addInfusion({
       name: "Ringer",
-      startTime: time,
+      startedAt: time,
       amount: 500,
-      unit: "ml",
-      durationMinutes: 30,
-      endTime: null,
+      unit: { label: "mL", code: "mL", system: "UCUM", isCustom: false },
+      concentration: null,
+      endedAt: time + 30 * 60_000,
       ongoing: false,
     });
     expect(loadCase()).toMatchObject({ status: "ok", data: { medications: [{ id: medication.id }], infusions: [{ id: infusion.id }] } });
@@ -131,6 +131,47 @@ describe("anesthesiaCaseStore", () => {
     useCaseStore.getState().removeInfusion(infusion.id);
     expect(useCaseStore.getState().medications).toHaveLength(0);
     expect(useCaseStore.getState().infusions).toHaveLength(0);
+  });
+
+  it("akzeptiert SpO₂ 0 und 100 und lehnt Werte außerhalb auch im Store ab", () => {
+    useCaseStore.getState().startCase();
+    const time = useCaseStore.getState().startedAt!;
+    expect(() => useCaseStore.getState().addMeasurement({ kind: "spo2", time, value: 0 })).not.toThrow();
+    expect(() => useCaseStore.getState().addMeasurement({ kind: "spo2", time: time + 1, value: 100 })).not.toThrow();
+    expect(() => useCaseStore.getState().addMeasurement({ kind: "spo2", time: time + 2, value: -1 })).toThrow(/0 und 100/);
+    expect(() => useCaseStore.getState().addMeasurement({ kind: "spo2", time: time + 3, value: 100.1 })).toThrow(/0 und 100/);
+  });
+
+  it("bewahrt Temperatur-Zwischenwerte an verschiedenen Timestamps und nach Reload", () => {
+    useCaseStore.getState().startCase();
+    const time = useCaseStore.getState().startedAt!;
+    [35.2, 35.7, 36.1, 36.4, 36.8, 37.2, 38.6].forEach((value, index) => {
+      useCaseStore.getState().addMeasurement({ kind: "temperature", time: time + index * 1_000, value });
+    });
+    expect(useCaseStore.getState().measurements.filter((item) => item.kind === "temperature")).toHaveLength(7);
+    resetStore();
+    useCaseStore.getState().hydrate();
+    expect(useCaseStore.getState().measurements.filter((item) => item.kind === "temperature")).toHaveLength(7);
+  });
+
+  it("verschiebt ein Therapieende, beendet ongoing und lehnt Ende vor Beginn ab", () => {
+    useCaseStore.getState().startCase();
+    const time = useCaseStore.getState().startedAt!;
+    const medication = useCaseStore.getState().addMedication({
+      administrationType: "continuous",
+      name: "Perfusor",
+      startedAt: time,
+      dose: 1,
+      unit: { label: "mg/h", code: "mg/h", system: "UCUM", isCustom: false },
+      concentration: null,
+      endedAt: null,
+      ongoing: true,
+    });
+    expect(useCaseStore.getState().updateTherapyEnd("medication", medication.id, time - 1)).toBe(false);
+    expect(useCaseStore.getState().medications[0]).toMatchObject({ ongoing: true, endedAt: null });
+    expect(useCaseStore.getState().updateTherapyEnd("medication", medication.id, time + 47 * 60_000)).toBe(true);
+    expect(useCaseStore.getState().medications[0]).toMatchObject({ ongoing: false, endedAt: time + 47 * 60_000 });
+    expect(loadCase()).toMatchObject({ status: "ok", data: { medications: [{ endedAt: time + 47 * 60_000 }] } });
   });
 
   it("persistiert NiBP erst mit Mittelwert und danach mit gezogenen Endpunkten", () => {

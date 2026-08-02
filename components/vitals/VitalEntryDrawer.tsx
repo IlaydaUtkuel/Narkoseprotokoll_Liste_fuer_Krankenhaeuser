@@ -163,7 +163,9 @@ function ScalarForm({
       <Form.Item
         label={`${c.label} (${c.unit})`}
         name="value"
-        rules={[finiteNumberRule("Bitte einen endlichen Zahlenwert eingeben.")]}
+        rules={draft.kind === "spo2"
+          ? [finiteNumberRule("Bitte einen endlichen Zahlenwert eingeben."), spo2RangeRule()]
+          : [finiteNumberRule("Bitte einen endlichen Zahlenwert eingeben.")]}
       >
         {draft.kind === "temperature" ? (
           <AutoComplete
@@ -293,6 +295,17 @@ function finiteNumberRule(message: string, optional = false) {
       return Number.isFinite(numeric)
         ? Promise.resolve()
         : Promise.reject(new Error(message));
+    },
+  };
+}
+
+function spo2RangeRule() {
+  return {
+    validator: (_: unknown, value: unknown) => {
+      const numeric = typeof value === "number" ? value : Number(value);
+      return Number.isFinite(numeric) && numeric >= 0 && numeric <= 100
+        ? Promise.resolve()
+        : Promise.reject(new Error("Der SpO₂-Wert muss zwischen 0 und 100 % liegen."));
     },
   };
 }

@@ -126,3 +126,32 @@ test("Basisdaten: eingeben, speichern, wiederherstellen, navigieren und entferne
   await expect(page2.getByTestId("field-asaClass")).not.toContainText(DEMO.asaLabel);
   await expect(page2.getByTestId("field-mallampatiClass")).not.toContainText(DEMO.mallampatiLabel);
 });
+
+test("Basisdaten: Keine-Allergien-Toggle, Bestätigung, sichtbares Namensformat und lokales Heute", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.getByText("Patient/-in (Vorname, Nachname):", { exact: true })).toBeVisible();
+
+  await page.getByTestId("operation-date-today").click();
+  await expect(page.getByTestId("input-operationDate")).toHaveValue(today());
+
+  const toggle = page.getByTestId("no-known-allergies");
+  await toggle.click();
+  await expect(toggle).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByTestId("input-allergies")).toBeDisabled();
+  await expect(page.getByTestId("input-allergies")).toHaveValue("Keine Allergien bekannt");
+  await toggle.click();
+  await expect(toggle).toHaveAttribute("aria-pressed", "false");
+  await expect(page.getByTestId("input-allergies")).toBeEnabled();
+
+  await page.getByTestId("input-allergies").fill("Penicillin");
+  await toggle.click();
+  await page.getByRole("button", { name: "Abbrechen", exact: true }).click();
+  await expect(page.getByTestId("input-allergies")).toHaveValue("Penicillin");
+  await expect(toggle).toHaveAttribute("aria-pressed", "false");
+  await toggle.click();
+  await page.getByRole("button", { name: "Fortfahren", exact: true }).click();
+  await expect(toggle).toHaveAttribute("aria-pressed", "true");
+  await page.reload();
+  await expect(toggle).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByTestId("input-allergies")).toHaveValue("Keine Allergien bekannt");
+});

@@ -3,7 +3,8 @@
 import { create } from "zustand";
 import { CASE_ID, CASE_SCHEMA_VERSION } from "../lib/timeline/config";
 import { clearCase, loadCase, saveCase } from "../lib/timeline/casePersistence";
-import { createId, findNearestSameKind } from "../lib/timeline/measurementUtils";
+import { createId, findNearestSameKind, isValidSpo2 } from "../lib/timeline/measurementUtils";
+import { validateTherapyEnd } from "../lib/timeline/therapyTime";
 import type {
   InfusionEntry,
   Measurement,
@@ -64,6 +65,7 @@ export interface CaseState {
   addInfusion: (input: NewInfusion) => InfusionEntry;
   updateInfusion: (id: string, input: NewInfusion) => void;
   removeInfusion: (id: string) => void;
+  updateTherapyEnd: (kind: "medication" | "infusion", id: string, endedAt: number) => boolean;
   upsertEvent: (eventType: TimelineEventType, time: number) => TimelineEvent;
   updateEventTime: (id: string, time: number) => void;
   updateEvent: (id: string, eventType: TimelineEventType, time: number) => void;
@@ -167,6 +169,9 @@ export const useCaseStore = create<CaseState>((set, get) => ({
   },
 
   addMeasurement: (input) => {
+    if (input.kind === "spo2" && !isValidSpo2(input.value)) {
+      throw new RangeError("Der SpO₂-Wert muss zwischen 0 und 100 % liegen.");
+    }
     const now = Date.now();
     const duplicate = findNearestSameKind(get().measurements, input.kind, input.time);
     if (duplicate) {
@@ -212,6 +217,10 @@ export const useCaseStore = create<CaseState>((set, get) => ({
   },
 
   updateScalar: (id, time, value) => {
+    const current = get().measurements.find((measurement) => measurement.id === id);
+    if (current?.kind === "spo2" && !isValidSpo2(value)) {
+      throw new RangeError("Der SpO₂-Wert muss zwischen 0 und 100 % liegen.");
+    }
     const now = Date.now();
     set({
       measurements: get().measurements.map((m) =>
@@ -239,6 +248,9 @@ export const useCaseStore = create<CaseState>((set, get) => ({
   },
 
   addMedication: (input) => {
+    if (!validateTherapyEnd(input.startedAt, input.endedAt, input.ongoing)) {
+      throw new RangeError("Das Ende muss nach dem Beginn liegen.");
+    }
     const now = Date.now();
     const medication: MedicationEntry = {
       ...input,
@@ -253,6 +265,9 @@ export const useCaseStore = create<CaseState>((set, get) => ({
   },
 
   updateMedication: (id, input) => {
+    if (!validateTherapyEnd(input.startedAt, input.endedAt, input.ongoing)) {
+      throw new RangeError("Das Ende muss nach dem Beginn liegen.");
+    }
     const now = Date.now();
     set({
       medications: get().medications.map((item) =>
@@ -268,6 +283,9 @@ export const useCaseStore = create<CaseState>((set, get) => ({
   },
 
   addInfusion: (input) => {
+    if (!validateTherapyEnd(input.startedAt, input.endedAt, input.ongoing)) {
+      throw new RangeError("Das Ende muss nach dem Beginn liegen.");
+    }
     const now = Date.now();
     const infusion: InfusionEntry = {
       ...input,
@@ -282,6 +300,9 @@ export const useCaseStore = create<CaseState>((set, get) => ({
   },
 
   updateInfusion: (id, input) => {
+    if (!validateTherapyEnd(input.startedAt, input.endedAt, input.ongoing)) {
+      throw new RangeError("Das Ende muss nach dem Beginn liegen.");
+    }
     const now = Date.now();
     set({
       infusions: get().infusions.map((item) =>
@@ -294,6 +315,28 @@ export const useCaseStore = create<CaseState>((set, get) => ({
   removeInfusion: (id) => {
     set({ infusions: get().infusions.filter((item) => item.id !== id) });
     persist(get, set);
+  },
+
+  updateTherapyEnd: (kind, id, endedAt) => {
+    const list = kind === "medication" ? get().medications : get().infusions;
+    const entry = list.find((item) => item.id === id);
+    if (!entry || !Number.isFinite(endedAt) || endedAt <= entry.startedAt) return false;
+    const now = Date.now();
+    if (kind === "medication") {
+      set({
+        medications: get().medications.map((item) =>
+          item.id === id ? { ...item, endedAt, ongoing: false, updatedAt: now } : item,
+        ),
+      });
+    } else {
+      set({
+        infusions: get().infusions.map((item) =>
+          item.id === id ? { ...item, endedAt, ongoing: false, updatedAt: now } : item,
+        ),
+      });
+    }
+    persist(get, set);
+    return true;
   },
 
   upsertEvent: (eventType, time) => {

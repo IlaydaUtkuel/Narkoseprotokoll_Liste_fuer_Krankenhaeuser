@@ -57,3 +57,39 @@
 .weightUnitSelect {
   min-width: 64px;
 }
+
+.dateWithAction,
+.allergyControl {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.dateWithAction > :first-child,
+.allergyControl > :first-child {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.noAllergiesButton {
+  min-height: 40px;
+  padding: 7px 13px;
+  border: 1px solid #9fb5ae;
+  border-radius: 8px;
+  background: #fff;
+  color: #243b36;
+  font: inherit;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.noAllergiesButtonActive {
+  border: 2px solid #1677ff;
+  background: #eaf3ff;
+  box-shadow: 0 0 0 2px rgba(22, 119, 255, 0.14);
+}
+
+.noAllergiesButton:focus-visible {
+  outline: 3px solid rgba(22, 119, 255, 0.3);
+  outline-offset: 2px;
+}

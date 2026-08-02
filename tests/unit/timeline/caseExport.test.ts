@@ -6,15 +6,15 @@ import type { PatientBaseData } from "@/types/patient";
 import type { PersistedCase } from "@/types/vitals";
 
 const START = 1_000_000;
-const patient: PatientBaseData = { patientName: "Test", birthDate: "01.01.2000", procedure: "OP", operationDate: "01.08.2026", bodyWeightKg: 70, weightUnit: "kg", asaClass: "II", mallampatiClass: "I", allergies: "keine", updatedAt: null };
+const patient: PatientBaseData = { patientName: "Test", birthDate: "01.01.2000", procedure: "OP", operationDate: "01.08.2026", bodyWeightKg: 70, weightUnit: "kg", asaClass: "II", mallampatiClass: "I", allergies: "keine", noKnownAllergies: false, updatedAt: null };
 const caseData: PersistedCase = {
   schemaVersion: CASE_SCHEMA_VERSION,
   caseId: CASE_ID,
   startedAt: START,
   endedAt: START + 10_000,
   measurements: [{ id: "n", kind: "nibp", time: START, systolic: 120, mean: 90, diastolic: 70, createdAt: START, updatedAt: START }],
-  medications: [{ id: "m", kind: "medication", administrationType: "bolus", name: "A", startTime: START, dose: 1, unit: "mg", durationMinutes: null, endTime: null, ongoing: false, createdAt: START, updatedAt: START }],
-  infusions: [{ id: "i", kind: "infusion", name: "I", startTime: START, amount: 1, unit: "ml", durationMinutes: 2, endTime: START + 120_000, ongoing: false, createdAt: START, updatedAt: START }],
+  medications: [{ id: "m", kind: "medication", administrationType: "bolus", name: "A", startedAt: START, dose: 1, unit: { label: "mg", code: "mg", system: "UCUM", isCustom: false }, concentration: null, endedAt: START + 60_000, ongoing: false, createdAt: START, updatedAt: START }],
+  infusions: [{ id: "i", kind: "infusion", name: "I", startedAt: START, amount: 1, unit: { label: "mL", code: "mL", system: "UCUM", isCustom: false }, concentration: null, endedAt: START + 120_000, ongoing: false, createdAt: START, updatedAt: START }],
   events: [{ id: "e", kind: "event", eventType: "incision", time: START, createdAt: START, updatedAt: START }],
   lastSavedAt: START + 10_000,
 };

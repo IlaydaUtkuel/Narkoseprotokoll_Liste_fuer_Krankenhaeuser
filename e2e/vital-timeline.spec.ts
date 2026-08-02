@@ -31,6 +31,7 @@ async function tapBandFraction(page: Page, kind: string, fraction: number) {
 }
 
 async function tapLaneFraction(page: Page, kind: "event" | "medication" | "infusion", fraction: number) {
+  await page.getByTestId(`lane-create-${kind}`).scrollIntoViewIfNeeded();
   const point = await page.evaluate(({ laneKind, fractionValue }) => {
     const lane = document.querySelector(`[data-testid="lane-create-${laneKind}"]`)!.getBoundingClientRect();
     return { x: lane.left + lane.width * fractionValue, y: lane.top + lane.height / 2 };
@@ -120,6 +121,13 @@ async function setTimePicker(page: Page, testId: string, value: string) {
   const input = await nested.count() ? nested : root;
   await input.fill(value);
   await input.press("Escape");
+}
+
+async function selectTherapyUnit(page: Page, testId: "medication-unit" | "infusion-unit", label: string) {
+  const select = page.getByTestId(testId);
+  await select.click();
+  await select.locator("input").fill(label);
+  await page.locator(`.ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-item-option[title="${label}"]`).click();
 }
 
 test.beforeEach(async ({ page }) => {
@@ -421,34 +429,50 @@ test("Story 8: Medikamente und Infusionen CRUD mit Persistence", async ({ page }
   await tapLaneFraction(page, "medication", 0.05);
   await page.getByTestId("medication-name").fill("Demo-Bolus");
   await page.getByTestId("medication-dose").fill("2");
-  await page.getByTestId("medication-unit").fill("mg");
-  await page.getByTestId("medication-duration").fill("20");
+  await selectTherapyUnit(page, "medication-unit", "Milligramm (mg)");
+  await page.getByTestId("therapy-duration").fill("20");
   await page.getByTestId("therapy-save").click();
+  await expect(page.getByTestId("medication-name")).toHaveCount(0);
+  await expect(page.locator(".ant-drawer-mask")).toHaveCount(0);
   const medicationId = await page.evaluate(() => JSON.parse(localStorage.getItem("sikant-anesthesia-demo-case:v1")!).medications[0].id);
   await expect(page.getByTestId(`medication-${medicationId}`)).toBeVisible();
   await expect(page.getByTestId(`medication-duration-${medicationId}`)).toBeVisible();
   await expect(page.getByTestId(`medication-hatch-${medicationId}-spo2`)).toBeVisible();
 
+  const hatch = page.getByTestId(`medication-hatch-${medicationId}-spo2`);
+  await hatch.scrollIntoViewIfNeeded();
   const hatchPoint = await page.evaluate((id) => {
     const hatch = document.querySelector(`[data-testid="medication-hatch-${id}-spo2"]`)!.getBoundingClientRect();
-    return { x: hatch.left + Math.min(8, hatch.width / 2), y: hatch.top + hatch.height / 2 };
+    return { x: hatch.left + hatch.width / 2, y: hatch.top + hatch.height / 2 };
   }, medicationId);
+  await page.mouse.move(0, 0);
   await page.mouse.move(hatchPoint.x, hatchPoint.y);
   await expect(page.getByTestId("therapy-interval-tooltip")).toContainText("Demo-Bolus");
+  await expect(page.getByTestId("timeline-crosshair")).toBeVisible();
+  const tooltipBoxes = await page.evaluate(() => {
+    const therapy = document.querySelector('[data-testid="therapy-interval-tooltip"]')!.getBoundingClientRect();
+    const crosshair = document.querySelector('[data-testid="timeline-crosshair"] .crosshair-tooltip')!.getBoundingClientRect();
+    return { therapy: { left: therapy.left, right: therapy.right, top: therapy.top, bottom: therapy.bottom }, crosshair: { left: crosshair.left, right: crosshair.right, top: crosshair.top, bottom: crosshair.bottom } };
+  });
+  const overlap = !(tooltipBoxes.therapy.right <= tooltipBoxes.crosshair.left || tooltipBoxes.crosshair.right <= tooltipBoxes.therapy.left || tooltipBoxes.therapy.bottom <= tooltipBoxes.crosshair.top || tooltipBoxes.crosshair.bottom <= tooltipBoxes.therapy.top);
+  expect(overlap).toBe(false);
 
   await tapLaneFraction(page, "medication", 0.35);
-  await page.getByText("Kontinuierliche Gabe", { exact: true }).click();
+  await expect(page.getByTestId("medication-name")).toBeVisible();
+  const continuousOption = page.getByTestId("medication-administration-type").locator('label:has(input[value="continuous"])');
+  await continuousOption.click();
+  await expect(page.getByRole("radio", { name: "Kontinuierliche Gabe" })).toBeChecked();
   await page.getByTestId("medication-name").fill("Demo-Perfusor");
   await page.getByTestId("medication-dose").fill("1");
-  await page.getByTestId("medication-unit").fill("mg/h");
-  await page.getByTestId("medication-duration").fill("15");
+  await selectTherapyUnit(page, "medication-unit", "mg/h");
+  await page.getByTestId("therapy-duration").fill("15");
   await page.getByTestId("therapy-save").click();
 
   await page.getByTestId("lane-create-infusion").press("Enter");
   await page.getByTestId("infusion-name").fill("Ringer");
   await page.getByTestId("infusion-amount").fill("500");
-  await page.getByTestId("infusion-unit").fill("ml");
-  await page.getByTestId("infusion-duration").fill("30");
+  await selectTherapyUnit(page, "infusion-unit", "mL");
+  await page.getByTestId("therapy-duration").fill("30");
   await page.getByTestId("therapy-save").click();
   const infusionId = await page.evaluate(() => JSON.parse(localStorage.getItem("sikant-anesthesia-demo-case:v1")!).infusions[0].id);
   await expect(page.getByTestId(`infusion-${infusionId}`)).toBeVisible();
@@ -621,6 +645,125 @@ test("relative 5-Minuten-Warnung öffnet den exakten Bandwert und verschwindet e
   await expect(page.getByTestId(`checkpoint-warning-${checkpoint}`)).toBeVisible();
   await page.reload();
   await expect(page.getByTestId(`checkpoint-warning-${checkpoint}`)).toBeVisible();
+});
+
+test("Temperatur-Zwischenwerte bleiben vollständig; SpO₂ bleibt auf 0–100 begrenzt", async ({ page }) => {
+  await page.goto("/dokumentation");
+  const now = Date.now();
+  const startedAt = now - 10 * 60_000;
+  const values = [35.2, 35.7, 36.1, 36.4, 36.8, 37.2, 38.6];
+  await page.evaluate(({ startedAt, now, values }) => {
+    localStorage.setItem("sikant-anesthesia-demo-case:v1", JSON.stringify({
+      schemaVersion: 4,
+      caseId: "temperature-series",
+      startedAt,
+      endedAt: null,
+      measurements: values.map((value, index) => ({ id: `temp-${index}`, kind: "temperature", time: startedAt + (index + 1) * 60_000, value, createdAt: now, updatedAt: now })),
+      medications: [], infusions: [], events: [], lastSavedAt: now,
+    }));
+  }, { startedAt, now, values });
+  await page.reload();
+  await expect(page.getByTestId("points-temperature").locator("circle")).toHaveCount(7);
+  await page.reload();
+  await expect(page.getByTestId("points-temperature").locator("circle")).toHaveCount(7);
+
+  await tapBandNow(page, "spo2");
+  await page.getByTestId("entry-value").fill("100");
+  await page.getByTestId("entry-save").click();
+  await expect(page.getByTestId("entry-value")).toHaveCount(0);
+
+  await tapBandNow(page, "spo2");
+  await page.getByTestId("entry-value").fill("101");
+  await page.getByTestId("entry-save").click();
+  await expect(page.getByText("Der SpO₂-Wert muss zwischen 0 und 100 % liegen.")).toBeVisible();
+});
+
+test("Checkpoint-Y übernimmt Herzfrequenz und NIBP-Mittel aus der echten Klickhöhe", async ({ page }) => {
+  await page.goto("/dokumentation");
+  const startedAt = await seedStartedCase(page, 6);
+  const checkpoint = startedAt + 5 * 60_000;
+  const heartRateHit = page.getByTestId(`checkpoint-band-heartRate-${checkpoint}`);
+  const heartRateBox = await heartRateHit.boundingBox();
+  expect(heartRateBox).not.toBeNull();
+  await page.mouse.click(heartRateBox!.x + heartRateBox!.width / 2, heartRateBox!.y + heartRateBox!.height / 2);
+  await expect(page.getByTestId("entry-value")).toHaveValue("115");
+  await expect(page.getByText("Herzfrequenz (/min)")).toBeVisible();
+  await page.getByTestId("entry-cancel").click();
+  await expect(page.getByTestId("entry-value")).toHaveCount(0);
+
+  const nibpHit = page.getByTestId(`checkpoint-band-nibp-${checkpoint}`);
+  await nibpHit.scrollIntoViewIfNeeded();
+  const nibpBox = await nibpHit.boundingBox();
+  expect(nibpBox).not.toBeNull();
+  await page.mouse.click(nibpBox!.x + nibpBox!.width / 2, nibpBox!.y + nibpBox!.height / 2);
+  await expect(page.getByTestId("entry-mean")).toHaveValue("125");
+});
+
+test("Therapieende über Mitternacht, Einheit und Ende-Handle bleiben nach Drag, Zielklick und Reload konsistent", async ({ page }, testInfo) => {
+  await page.goto("/dokumentation");
+  await seedStartedCase(page, 20);
+  await tapLaneFraction(page, "medication", 0.08);
+  await page.getByTestId("medication-name").fill("Nacht-Perfusor");
+  await page.getByTestId("medication-dose").fill("1");
+  await selectTherapyUnit(page, "medication-unit", "Milligramm (mg)");
+  await page.getByTestId("therapy-end-mode").getByText("Ende", { exact: true }).click();
+  const startClock = await page.getByTestId("therapy-time").inputValue();
+  const [hour, minute] = startClock.split(":").map(Number);
+  const earlierClock = `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}:00`;
+  await setTimePicker(page, "therapy-end-time", earlierClock);
+  await expect(page.getByTestId("therapy-end-preview")).toContainText("(morgen)");
+  await page.getByTestId("therapy-save").click();
+  await expect(page.locator(".ant-drawer-mask")).toHaveCount(0);
+
+  const initial = await page.evaluate(() => JSON.parse(localStorage.getItem("sikant-anesthesia-demo-case:v1")!).medications[0]);
+  expect(initial.endedAt).toBeGreaterThan(initial.startedAt);
+  expect(new Date(initial.endedAt).getDate()).not.toBe(new Date(initial.startedAt).getDate());
+  expect(initial.unit).toMatchObject({ code: "mg", system: "UCUM", isCustom: false });
+
+  const hit = page.getByTestId(`medication-${initial.id}-end-hit`);
+  await hit.scrollIntoViewIfNeeded();
+  const box = await hit.boundingBox();
+  expect(box).not.toBeNull();
+  const fromX = box!.x + box!.width / 2;
+  const y = box!.y + box!.height / 2;
+  const toX = fromX - 70;
+  if (testInfo.project.name === "ipad-viewport") {
+    await hit.dispatchEvent("pointerdown", { pointerId: 41, pointerType: "touch", button: 0, clientX: fromX, clientY: y });
+    await hit.dispatchEvent("pointermove", { pointerId: 41, pointerType: "touch", button: 0, clientX: toX, clientY: y });
+    await hit.dispatchEvent("pointerup", { pointerId: 41, pointerType: "touch", button: 0, clientX: toX, clientY: y });
+  } else {
+    await page.mouse.move(fromX, y);
+    await page.mouse.down();
+    await page.mouse.move(toX, y, { steps: 5 });
+    await page.mouse.up();
+  }
+  const dragged = await page.evaluate(() => JSON.parse(localStorage.getItem("sikant-anesthesia-demo-case:v1")!).medications[0]);
+  expect(dragged.endedAt).toBeLessThan(initial.endedAt);
+
+  const movedHit = page.getByTestId(`medication-${initial.id}-end-hit`);
+  await movedHit.scrollIntoViewIfNeeded();
+  if (testInfo.project.name === "ipad-viewport") {
+    const movedBox = await movedHit.boundingBox();
+    await page.touchscreen.tap(movedBox!.x + movedBox!.width / 2, movedBox!.y + movedBox!.height / 2);
+  } else {
+    await movedHit.click();
+  }
+  await expect(page.getByTestId("therapy-end-preview")).toBeVisible();
+  await page.getByTestId("band-temperature").scrollIntoViewIfNeeded();
+  const target = await page.evaluate(() => {
+    const band = document.querySelector('[data-testid="band-temperature"]')!.getBoundingClientRect();
+    const nowDot = document.querySelector('[data-testid="now-dot"]')!;
+    const svg = document.querySelector('[data-testid="vital-timeline-svg"]')!.getBoundingClientRect();
+    return { x: svg.left + Number(nowDot.getAttribute("cx")) - 10, y: band.top + band.height / 2 };
+  });
+  if (testInfo.project.name === "ipad-viewport") await page.touchscreen.tap(target.x, target.y);
+  else await page.mouse.click(target.x, target.y);
+  const placed = await page.evaluate(() => JSON.parse(localStorage.getItem("sikant-anesthesia-demo-case:v1")!).medications[0]);
+  expect(placed.endedAt).not.toBe(dragged.endedAt);
+  await page.reload();
+  const reloaded = await page.evaluate(() => JSON.parse(localStorage.getItem("sikant-anesthesia-demo-case:v1")!).medications[0]);
+  expect(reloaded.endedAt).toBe(placed.endedAt);
+  expect(reloaded.unit.code).toBe("mg");
 });
 
 test("Kontrolle zeigt reale Daten und erstellt ohne Share API eine echte herunterladbare JSON-Datei", async ({ page }) => {

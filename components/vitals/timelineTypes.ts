@@ -48,9 +48,9 @@ export type EntryDraft =
     };
 
 export type TherapyDraft =
-  | { mode: "create-medication"; startTime: number }
+  | { mode: "create-medication"; startedAt: number }
   | { mode: "edit-medication"; entry: MedicationEntry }
-  | { mode: "create-infusion"; startTime: number }
+  | { mode: "create-infusion"; startedAt: number }
   | { mode: "edit-infusion"; entry: InfusionEntry }
   | { mode: "create-event"; eventType: TimelineEventType; time: number }
   | { mode: "edit-event"; entry: TimelineEvent };

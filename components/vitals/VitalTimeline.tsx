@@ -8,7 +8,7 @@ import { findNearestHit, type HitTarget } from "../../lib/timeline/hitTesting";
 import { buildXScale, buildYScales, computeDomain, timeToX, xToTime } from "../../lib/timeline/scales";
 import { relativeTimelineTicks } from "../../lib/timeline/timeTicks";
 import { mapPointerToTimeline, type PointerMapResult } from "../../lib/timeline/pointerMapping";
-import { clampValue, roundToPrecision } from "../../lib/timeline/measurementUtils";
+import { clampValue, normalizeVitalPointerValue, roundToPrecision } from "../../lib/timeline/measurementUtils";
 import { formatClock, formatVitalNumber } from "../../lib/timeline/format";
 import { computeVitalScaleDomains } from "../../lib/timeline/dynamicYScale";
 import { deriveCheckpointWarnings } from "../../lib/timeline/checkpoints";
@@ -34,13 +34,14 @@ import {
   TherapyMarkerLayer,
   therapyIntervalsAtTime,
   type ActiveTherapyInterval,
+  type TherapyEndPlacement,
 } from "./TherapyLayers";
 import {
   TherapyLaneInteractionLayer,
   type LanePlacementPreview,
 } from "./TherapyLaneInteractions";
 import type { BandContext, DragPreview, EntryDraft, TherapyDraft } from "./timelineTypes";
-import type { Measurement, NibpMeasurement, ScalarMeasurement, TimelineEventType, VitalKind } from "../../types/vitals";
+import type { InfusionEntry, Measurement, MedicationEntry, NibpMeasurement, ScalarMeasurement, TimelineEventType, VitalKind } from "../../types/vitals";
 
 const MIN_WIDTH = 320;
 const NOW_INTERVAL_MS = 250;
@@ -83,6 +84,7 @@ export function VitalTimeline() {
   const [containerRef, size] = useElementSize<HTMLDivElement>();
   const svgRef = useRef<SVGSVGElement | null>(null);
   const pointerRef = useRef<PlotPointerState>({ ...EMPTY_POINTER });
+  const therapyEndPlacementRef = useRef<TherapyEndPlacement | null>(null);
 
   const startedAt = useCaseStore((state) => state.startedAt);
   const endedAt = useCaseStore((state) => state.endedAt);
@@ -94,6 +96,7 @@ export function VitalTimeline() {
   const updateNibp = useCaseStore((state) => state.updateNibp);
   const updateEventTime = useCaseStore((state) => state.updateEventTime);
   const upsertEvent = useCaseStore((state) => state.upsertEvent);
+  const updateTherapyEnd = useCaseStore((state) => state.updateTherapyEnd);
 
   const now = useCurrentTime(NOW_INTERVAL_MS, endedAt);
   const [draft, setDraft] = useState<EntryDraft | null>(null);
@@ -105,12 +108,15 @@ export function VitalTimeline() {
   const [lanePreview, setLanePreview] = useState<LanePlacementPreview | null>(null);
   const [intervalTooltip, setIntervalTooltip] = useState<IntervalTooltipState | null>(null);
   const [selectedCheckpoint, setSelectedCheckpoint] = useState<number | null>(null);
+  const [therapyEndPlacement, setTherapyEndPlacement] = useState<TherapyEndPlacement | null>(null);
 
   useEffect(() => {
     const clearEventSelection = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
       setSelectedEventType(null);
       setLanePreview(null);
+      therapyEndPlacementRef.current = null;
+      setTherapyEndPlacement(null);
     };
     window.addEventListener("keydown", clearEventSelection);
     return () => window.removeEventListener("keydown", clearEventSelection);
@@ -247,9 +253,13 @@ export function VitalTimeline() {
     }
   };
 
-  const openCheckpointBand = (kind: VitalKind, time: number) => {
+  const openCheckpointBand = (kind: VitalKind, time: number, clientY?: number) => {
     const band = layout.bandByKind[kind];
-    const pointerValue = roundToPrecision(yScales[kind].invert((band.innerTop + band.innerBottom) / 2), VITAL_CONFIG[kind].precision);
+    const rect = svgRef.current?.getBoundingClientRect();
+    const svgY = clientY !== undefined && rect
+      ? clampValue(clientY - rect.top, band.innerTop, band.innerBottom)
+      : (band.innerTop + band.innerBottom) / 2;
+    const pointerValue = normalizeVitalPointerValue(kind, yScales[kind].invert(svgY));
     setSelectedCheckpoint(time);
     setCrosshair({
       ok: true,
@@ -258,11 +268,60 @@ export function VitalTimeline() {
       value: kind === "nibp" ? null : pointerValue,
       pointerValue,
       svgX: timeToX(xScale, time),
-      svgY: yScales[kind](pointerValue),
+      svgY,
       locked: true,
     });
     if (kind === "nibp") setDraft({ mode: "create-nibp", time, mean: pointerValue });
     else setDraft({ mode: "create-scalar", kind, time, value: pointerValue });
+  };
+
+  const selectTherapyEnd = (
+    kind: "medication" | "infusion",
+    entry: MedicationEntry | InfusionEntry,
+  ) => {
+    const placement = {
+      kind,
+      id: entry.id,
+      previewTime: entry.endedAt ?? maxDocumentableTime(nowValue, endedAt),
+    };
+    therapyEndPlacementRef.current = placement;
+    setTherapyEndPlacement(placement);
+    setDraft(null);
+    setTherapyDraft(null);
+    setCrosshair(null);
+  };
+
+  const previewTherapyEnd = (time: number) => {
+    const current = therapyEndPlacementRef.current;
+    if (!current) return;
+    const next = { ...current, previewTime: time };
+    therapyEndPlacementRef.current = next;
+    setTherapyEndPlacement(next);
+  };
+
+  const commitTherapyEnd = (time: number) => {
+    const current = therapyEndPlacementRef.current;
+    if (!current) return;
+    const saved = updateTherapyEnd(current.kind, current.id, time);
+    if (saved) {
+      message.success("Endzeit gespeichert.");
+      therapyEndPlacementRef.current = null;
+      setTherapyEndPlacement(null);
+    } else {
+      message.error("Das Ende muss nach dem Beginn liegen.");
+    }
+  };
+
+  const endTimeAtClientX = (clientX: number) => {
+    const current = therapyEndPlacementRef.current;
+    if (!current || !svgRef.current) return null;
+    const entry = current.kind === "medication"
+      ? medications.find((item) => item.id === current.id)
+      : infusions.find((item) => item.id === current.id);
+    if (!entry) return null;
+    const rect = svgRef.current.getBoundingClientRect();
+    const x = clampValue(clientX - rect.left, layout.plotLeft, layout.plotRight);
+    return Math.round(clampValue(xToTime(xScale, x), entry.startedAt + 1_000, maxDocumentableTime(nowValue, endedAt)));
   };
 
   const onScalarDragMove = (measurement: ScalarMeasurement, clientX: number, clientY: number) => {
@@ -308,6 +367,12 @@ export function VitalTimeline() {
       message.info("Bitte starten Sie zuerst den Fall.");
       return;
     }
+    if (therapyEndPlacement) {
+      const time = endTimeAtClientX(event.clientX);
+      if (time !== null) previewTherapyEnd(time);
+      pointerRef.current = { ...EMPTY_POINTER, active: true, pointerId: event.pointerId, pointerType: event.pointerType, startX: event.clientX, startY: event.clientY };
+      return;
+    }
     setSelectedCheckpoint(null);
     const mapped = mapPointer(event.clientX, event.clientY);
     if ("svgX" in mapped) setCrosshair({ ...mapped, locked: true });
@@ -337,6 +402,11 @@ export function VitalTimeline() {
 
   const onPlotPointerMove = (event: ReactPointerEvent<SVGRectElement>) => {
     const state = pointerRef.current;
+    if (therapyEndPlacement) {
+      const time = endTimeAtClientX(event.clientX);
+      if (time !== null) previewTherapyEnd(time);
+      return;
+    }
     if (!state.active || state.pointerId !== event.pointerId) {
       if ((event.pointerType === "mouse" || event.pointerType === "pen") && !draft && !therapyDraft) {
         const mapped = mapPointer(event.clientX, event.clientY);
@@ -358,9 +428,23 @@ export function VitalTimeline() {
     }
   };
 
+  const onSvgPointerMove = (event: ReactPointerEvent<SVGSVGElement>) => {
+    if (event.pointerType !== "mouse" && event.pointerType !== "pen") return;
+    if (pointerRef.current.active || draft || therapyDraft || therapyEndPlacementRef.current) return;
+    const mapped = mapPointer(event.clientX, event.clientY);
+    setCrosshair("svgX" in mapped ? { ...mapped, locked: false } : null);
+    setIntervalTooltip(intervalAtPointer(event.clientX, event.clientY, false));
+  };
+
   const onPlotPointerUp = (event: ReactPointerEvent<SVGRectElement>) => {
     const state = pointerRef.current;
     if (!state.active || state.pointerId !== event.pointerId) return;
+    if (therapyEndPlacement) {
+      const time = endTimeAtClientX(event.clientX);
+      if (time !== null) commitTherapyEnd(time);
+      resetPointer();
+      return;
+    }
     const target = state.targetId ? measurements.find((measurement) => measurement.id === state.targetId) : null;
     if (!state.moved && !target && event.pointerType === "touch") {
       const touchedInterval = intervalAtPointer(event.clientX, event.clientY, true);
@@ -427,6 +511,11 @@ export function VitalTimeline() {
             aria-label="Gemeinsame Zeitgrafik für Therapien, Ereignisse und Vitalparameter"
             data-testid="vital-timeline-svg"
             style={{ touchAction: "pan-y", display: "block" }}
+            onPointerMove={onSvgPointerMove}
+            onPointerLeave={() => {
+              if (!crosshair?.locked && !draft) setCrosshair(null);
+              if (!intervalTooltip?.locked) setIntervalTooltip(null);
+            }}
           >
             <TherapyLaneBackgrounds layout={layout} />
             {layout.bands.map((band) => (
@@ -444,8 +533,10 @@ export function VitalTimeline() {
                 selectedEvent={selectedEventType}
                 preview={lanePreview}
                 onPreview={setLanePreview}
-                onCreateMedication={(time) => openTherapyDraft({ mode: "create-medication", startTime: time })}
-                onCreateInfusion={(time) => openTherapyDraft({ mode: "create-infusion", startTime: time })}
+                activeEndPlacement={therapyEndPlacement !== null}
+                onPlaceTherapyEnd={(time) => commitTherapyEnd(time)}
+                onCreateMedication={(time) => openTherapyDraft({ mode: "create-medication", startedAt: time })}
+                onCreateInfusion={(time) => openTherapyDraft({ mode: "create-infusion", startedAt: time })}
                 onPlaceEvent={(eventType, time) => {
                   upsertEvent(eventType, time);
                   setLanePreview(null);
@@ -485,9 +576,18 @@ export function VitalTimeline() {
               onPointerDown={onPlotPointerDown}
               onPointerMove={onPlotPointerMove}
               onPointerUp={onPlotPointerUp}
+              onClick={(event) => {
+                if (!therapyEndPlacementRef.current) return;
+                const time = endTimeAtClientX(event.clientX);
+                if (time !== null) commitTherapyEnd(time);
+              }}
               onPointerCancel={() => {
                 setDragPreview(null);
                 setIntervalTooltip(null);
+                if (therapyEndPlacement) {
+                  therapyEndPlacementRef.current = null;
+                  setTherapyEndPlacement(null);
+                }
                 resetPointer();
               }}
               onPointerLeave={() => {
@@ -530,12 +630,20 @@ export function VitalTimeline() {
                   onEditInfusion={(entry) => openTherapyDraft({ mode: "edit-infusion", entry })}
                   onEditEvent={(entry) => openTherapyDraft({ mode: "edit-event", entry })}
                   onCommitEventTime={updateEventTime}
+                  selectedEnd={therapyEndPlacement}
+                  onSelectEnd={selectTherapyEnd}
+                  onPreviewEnd={previewTherapyEnd}
+                  onCommitEnd={commitTherapyEnd}
+                  onCancelEnd={() => {
+                    therapyEndPlacementRef.current = null;
+                    setTherapyEndPlacement(null);
+                  }}
                 />
                 <CurrentTimeIndicator layout={layout} xScale={xScale} startedAt={startedAt} now={nowValue} />
               </>
             ) : null}
             {intervalTooltip ? (
-              <TherapyIntervalTooltip items={intervalTooltip.items} x={intervalTooltip.x} y={intervalTooltip.y} layout={layout} />
+              <TherapyIntervalTooltip items={intervalTooltip.items} x={intervalTooltip.x} y={intervalTooltip.y} layout={layout} avoidRect={crosshairTooltipRect(crosshair, layout)} />
             ) : null}
             <CrosshairLayer crosshair={crosshair} layout={layout} />
             {renderDraftPreview(draft, xScale, yScales)}
@@ -566,13 +674,25 @@ function crosshairForMeasurement(
   };
 }
 
+function crosshairTooltipRect(crosshair: CrosshairState | null, layout: BandContext["layout"]) {
+  if (!crosshair) return null;
+  const band = layout.bandByKind[crosshair.kind];
+  const width = 214;
+  const height = crosshair.ok ? 28 : 43;
+  return {
+    x: crosshair.svgX > layout.plotRight - 230 ? crosshair.svgX - 224 : crosshair.svgX + 10,
+    y: clampValue(crosshair.svgY - 42, band.top + 4, band.bottom - height - 4),
+    width,
+    height,
+  };
+}
+
 function CrosshairLayer({ crosshair, layout }: { crosshair: CrosshairState | null; layout: BandContext["layout"] }) {
   if (!crosshair) return null;
   const config = VITAL_CONFIG[crosshair.kind];
-  const band = layout.bandByKind[crosshair.kind];
-  const nearRight = crosshair.svgX > layout.plotRight - 230;
-  const labelX = nearRight ? crosshair.svgX - 224 : crosshair.svgX + 10;
-  const labelY = clampValue(crosshair.svgY - 42, band.top + 4, band.bottom - 48);
+  const tooltipRect = crosshairTooltipRect(crosshair, layout)!;
+  const labelX = tooltipRect.x;
+  const labelY = tooltipRect.y;
   const valueLabel = crosshair.kind === "nibp"
     ? `Zeigerwert ${formatVitalNumber("nibp", crosshair.pointerValue)} ${config.unit}`
     : `${config.label} ${formatVitalNumber(crosshair.kind, crosshair.pointerValue)} ${config.unit}`;
@@ -589,7 +709,7 @@ function CrosshairLayer({ crosshair, layout }: { crosshair: CrosshairState | nul
       <line x1={layout.plotLeft} y1={crosshair.svgY} x2={layout.plotRight} y2={crosshair.svgY} className="crosshair-horizontal" />
       <line x1={crosshair.svgX - 6} y1={crosshair.svgY} x2={crosshair.svgX + 6} y2={crosshair.svgY} className="crosshair-center" />
       <line x1={crosshair.svgX} y1={crosshair.svgY - 6} x2={crosshair.svgX} y2={crosshair.svgY + 6} className="crosshair-center" />
-      <rect x={labelX} y={labelY} width={214} height={invalidLabel ? 43 : 28} rx={6} className="crosshair-tooltip" />
+      <rect x={labelX} y={labelY} width={tooltipRect.width} height={tooltipRect.height} rx={6} className="crosshair-tooltip" />
       <text x={labelX + 8} y={labelY + 18} className="crosshair-tooltip-text" data-testid="crosshair-coordinate">
         {formatClock(crosshair.time)} · {valueLabel}
       </text>

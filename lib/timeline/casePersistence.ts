@@ -7,6 +7,8 @@ import {
   type PersistedCase,
   type TimelineEvent,
 } from "../../types/vitals";
+import { endFromDuration, resolveEndFromClock } from "./therapyTime";
+import { migrateTherapyUnit } from "./therapyUnits";
 
 function getStorage(): Storage | null {
   try {
@@ -57,7 +59,38 @@ function nullableFiniteNumber(value: unknown): number | null | undefined {
   return isFiniteNumber(value) ? value : undefined;
 }
 
-function parseMedication(raw: unknown): MedicationEntry | null {
+function parseTherapyTimestamp(
+  raw: unknown,
+  reference: number | null,
+  rollForwardWhenEarlier: boolean,
+): number | null | undefined {
+  if (raw === null || raw === undefined) return null;
+  if (isFiniteNumber(raw)) return raw;
+  if (typeof raw !== "string") return undefined;
+  const parsedIso = Date.parse(raw);
+  if (Number.isFinite(parsedIso)) return parsedIso;
+  const clock = /^(\d{1,2}):(\d{2})(?::(\d{2}))?$/.exec(raw.trim());
+  if (!clock || reference === null) return undefined;
+  const hour = Number(clock[1]);
+  const minute = Number(clock[2]);
+  const second = Number(clock[3] ?? 0);
+  if (hour > 23 || minute > 59 || second > 59) return undefined;
+  const timestamp = resolveEndFromClock(reference, { hour, minute, second }, null);
+  if (rollForwardWhenEarlier) return timestamp;
+  const sameDay = new Date(reference);
+  sameDay.setHours(hour, minute, second, 0);
+  return sameDay.getTime() < reference ? timestamp : sameDay.getTime();
+}
+
+function parseConcentration(raw: unknown) {
+  if (raw === null || raw === undefined) return null;
+  if (typeof raw !== "object" || Array.isArray(raw)) return undefined;
+  const value = raw as Record<string, unknown>;
+  const unit = migrateTherapyUnit(value.unit);
+  return isFiniteNumber(value.value) && unit ? { value: value.value, unit } : undefined;
+}
+
+function parseMedication(raw: unknown, caseStartedAt: number | null): MedicationEntry | null {
   if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return null;
   const o = raw as Record<string, unknown>;
   if (
@@ -65,55 +98,69 @@ function parseMedication(raw: unknown): MedicationEntry | null {
     o.kind !== "medication" ||
     (o.administrationType !== "bolus" && o.administrationType !== "continuous") ||
     typeof o.name !== "string" ||
-    !isFiniteNumber(o.startTime) ||
-    !isFiniteNumber(o.dose) ||
-    typeof o.unit !== "string"
+    !isFiniteNumber(o.dose)
   ) return null;
-  const durationMinutes = nullableFiniteNumber(o.durationMinutes);
-  const endTime = nullableFiniteNumber(o.endTime);
-  if (durationMinutes === undefined || endTime === undefined) return null;
-  const createdAt = isFiniteNumber(o.createdAt) ? o.createdAt : o.startTime;
+  const startedAt = parseTherapyTimestamp(o.startedAt ?? o.startTime, caseStartedAt, false);
+  if (startedAt === null || startedAt === undefined) return null;
+  const ongoing = o.ongoing === true;
+  let endedAt = parseTherapyTimestamp(o.endedAt ?? o.endTime, startedAt, true);
+  if (endedAt === undefined) return null;
+  if (endedAt === null && !ongoing && isFiniteNumber(o.durationMinutes) && o.durationMinutes > 0) {
+    endedAt = endFromDuration(startedAt, o.durationMinutes);
+  }
+  if (ongoing) endedAt = null;
+  const unit = migrateTherapyUnit(o.unit);
+  const concentration = parseConcentration(o.concentration);
+  if (!unit || concentration === undefined) return null;
+  const createdAt = isFiniteNumber(o.createdAt) ? o.createdAt : startedAt;
   return {
     id: o.id,
     kind: "medication",
     administrationType: o.administrationType,
     name: o.name,
-    startTime: o.startTime,
+    startedAt,
     dose: o.dose,
-    unit: o.unit,
-    durationMinutes,
-    endTime,
-    ongoing: o.ongoing === true,
+    unit,
+    concentration,
+    endedAt,
+    ongoing,
     createdAt,
     updatedAt: isFiniteNumber(o.updatedAt) ? o.updatedAt : createdAt,
   };
 }
 
-function parseInfusion(raw: unknown): InfusionEntry | null {
+function parseInfusion(raw: unknown, caseStartedAt: number | null): InfusionEntry | null {
   if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return null;
   const o = raw as Record<string, unknown>;
   if (
     typeof o.id !== "string" ||
     o.kind !== "infusion" ||
     typeof o.name !== "string" ||
-    !isFiniteNumber(o.startTime) ||
-    !isFiniteNumber(o.amount) ||
-    typeof o.unit !== "string"
+    !isFiniteNumber(o.amount)
   ) return null;
-  const durationMinutes = nullableFiniteNumber(o.durationMinutes);
-  const endTime = nullableFiniteNumber(o.endTime);
-  if (durationMinutes === undefined || endTime === undefined) return null;
-  const createdAt = isFiniteNumber(o.createdAt) ? o.createdAt : o.startTime;
+  const startedAt = parseTherapyTimestamp(o.startedAt ?? o.startTime, caseStartedAt, false);
+  if (startedAt === null || startedAt === undefined) return null;
+  const ongoing = o.ongoing === true;
+  let endedAt = parseTherapyTimestamp(o.endedAt ?? o.endTime, startedAt, true);
+  if (endedAt === undefined) return null;
+  if (endedAt === null && !ongoing && isFiniteNumber(o.durationMinutes) && o.durationMinutes > 0) {
+    endedAt = endFromDuration(startedAt, o.durationMinutes);
+  }
+  if (ongoing) endedAt = null;
+  const unit = migrateTherapyUnit(o.unit);
+  const concentration = parseConcentration(o.concentration);
+  if (!unit || concentration === undefined) return null;
+  const createdAt = isFiniteNumber(o.createdAt) ? o.createdAt : startedAt;
   return {
     id: o.id,
     kind: "infusion",
     name: o.name,
-    startTime: o.startTime,
+    startedAt,
     amount: o.amount,
-    unit: o.unit,
-    durationMinutes,
-    endTime,
-    ongoing: o.ongoing === true,
+    unit,
+    concentration,
+    endedAt,
+    ongoing,
     createdAt,
     updatedAt: isFiniteNumber(o.updatedAt) ? o.updatedAt : createdAt,
   };
@@ -155,7 +202,7 @@ function parseArray<T>(raw: unknown, parser: (item: unknown) => T | null): T[] |
 export function parseCase(raw: unknown): PersistedCase | null {
   if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return null;
   const o = raw as Record<string, unknown>;
-  if (o.schemaVersion !== 1 && o.schemaVersion !== 2 && o.schemaVersion !== CASE_SCHEMA_VERSION) return null;
+  if (o.schemaVersion !== 1 && o.schemaVersion !== 2 && o.schemaVersion !== 3 && o.schemaVersion !== CASE_SCHEMA_VERSION) return null;
   if (!Array.isArray(o.measurements)) return null;
 
   const measurements: Measurement[] = [];
@@ -165,9 +212,10 @@ export function parseCase(raw: unknown): PersistedCase | null {
     measurements.push(m);
   }
 
+  const caseStartedAt = isFiniteNumber(o.startedAt) ? o.startedAt : null;
   const isLegacy = o.schemaVersion === 1;
-  const medications = isLegacy ? [] : parseArray(o.medications, parseMedication);
-  const infusions = isLegacy ? [] : parseArray(o.infusions, parseInfusion);
+  const medications = isLegacy ? [] : parseArray(o.medications, (item) => parseMedication(item, caseStartedAt));
+  const infusions = isLegacy ? [] : parseArray(o.infusions, (item) => parseInfusion(item, caseStartedAt));
   const events = isLegacy ? [] : parseArray(o.events, parseEvent);
   if (!medications || !infusions || !events) return null;
 
