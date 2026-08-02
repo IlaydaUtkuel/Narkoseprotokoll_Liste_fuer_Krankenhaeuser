@@ -7,6 +7,9 @@ function resetStore() {
   useCaseStore.setState({
     hydrated: false,
     loadError: false,
+    caseId: "test-case",
+    caseRevision: 0,
+    lastSuccessfullyExportedRevision: null,
     startedAt: null,
     endedAt: null,
     measurements: [],
@@ -78,6 +81,30 @@ describe("anesthesiaCaseStore", () => {
     expect(useCaseStore.getState().measurements).toHaveLength(0);
     const reloaded = loadCase();
     expect(reloaded.status === "ok" && reloaded.data.measurements.length === 0).toBe(true);
+  });
+
+  it("erhöht die Revision bei klinischen Änderungen und markiert nur echten Export als aktuell", () => {
+    useCaseStore.getState().startCase();
+    expect(useCaseStore.getState().caseRevision).toBe(1);
+    const time = useCaseStore.getState().startedAt!;
+    useCaseStore.getState().addMeasurement({ kind: "heartRate", time, value: 70 });
+    expect(useCaseStore.getState().caseRevision).toBe(2);
+    expect(useCaseStore.getState().lastSuccessfullyExportedRevision).toBeNull();
+    useCaseStore.getState().markSuccessfullyExported();
+    expect(useCaseStore.getState().lastSuccessfullyExportedRevision).toBe(2);
+    useCaseStore.getState().updateScalar(useCaseStore.getState().measurements[0].id, time, 71);
+    expect(useCaseStore.getState()).toMatchObject({ caseRevision: 3, lastSuccessfullyExportedRevision: 2 });
+  });
+
+  it("erhöht die Revision bei einer übernommenen Basisdatenänderung ohne Dokumentation zu verändern", () => {
+    useCaseStore.getState().startCase();
+    const time = useCaseStore.getState().startedAt!;
+    useCaseStore.getState().addMeasurement({ kind: "temperature", time, value: 37 });
+    const before = useCaseStore.getState().measurements;
+    const revision = useCaseStore.getState().caseRevision;
+    useCaseStore.getState().markBasisDataChanged();
+    expect(useCaseStore.getState().caseRevision).toBe(revision + 1);
+    expect(useCaseStore.getState().measurements).toEqual(before);
   });
 
   it("speichert endedAt und stellt es nach Hydration wieder her", () => {
@@ -203,6 +230,20 @@ describe("anesthesiaCaseStore", () => {
     expect(loadCase()).toMatchObject({ status: "ok", data: { events: [expect.objectContaining({ id: first.id, time: time + 2000 }), expect.objectContaining({ id: same.id })] } });
     useCaseStore.getState().removeEvent(first.id);
     expect(useCaseStore.getState().events).toHaveLength(1);
+  });
+
+  it("speichert, bearbeitet und entfernt einen Extra-Kommentar", () => {
+    useCaseStore.getState().startCase();
+    const time = useCaseStore.getState().startedAt!;
+    const extra = useCaseStore.getState().upsertEvent("extra", time, "Unerwartete Reaktion");
+    expect(loadCase()).toMatchObject({
+      status: "ok",
+      data: { events: [{ id: extra.id, eventType: "extra", comment: "Unerwartete Reaktion" }] },
+    });
+    useCaseStore.getState().updateEvent(extra.id, "extra", time + 1_000, "Maßnahme dokumentiert");
+    expect(useCaseStore.getState().events[0]).toMatchObject({ comment: "Maßnahme dokumentiert", time: time + 1_000 });
+    useCaseStore.getState().removeEvent(extra.id);
+    expect(useCaseStore.getState().events).toHaveLength(0);
   });
 
   it("ändert Ereignistyp und Zeit ohne andere gleichartige Einträge zu löschen", () => {

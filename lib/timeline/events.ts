@@ -12,6 +12,7 @@ export const TIMELINE_EVENT_DEFINITIONS: TimelineEventDefinition[] = [
   { type: "suture", label: "Naht", symbol: "⌁" },
   { type: "emergenceEnd", label: "Ende Ausleitung", symbol: "✓" },
   { type: "patientOut", label: "Patient aus dem Saal", symbol: "⇥" },
+  { type: "extra", label: "Extra", symbol: "✦" },
 ];
 
 export function eventDefinition(type: TimelineEventType): TimelineEventDefinition {

@@ -21,7 +21,7 @@ export function EventLaneTools({ layout, disabled, selected, onSelect }: Props) 
       x={8}
       y={lane.top + 34}
       width={160}
-      height={38}
+      height={66}
       data-testid="event-lane-tools"
       aria-label="Ereignissymbol auswählen"
     >

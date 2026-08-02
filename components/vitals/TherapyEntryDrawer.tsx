@@ -144,13 +144,15 @@ export function TherapyEntryDrawer({ draft, onClose }: Props) {
               caseEndedAt={endedAt}
               draft={draft}
               onCancel={onClose}
-              onDelete={draft.mode === "edit-event" ? () => {
-                removeEvent(draft.entry.id);
-                closeWithSuccess("Ereignis entfernt.");
-              } : undefined}
-              onSubmit={(eventType, time) => {
-                if (draft.mode === "edit-event") updateEvent(draft.entry.id, eventType, time);
-                else upsertEvent(eventType, time);
+              onDelete={draft.mode === "edit-event"
+                ? () => {
+                    removeEvent(draft.entry.id);
+                    closeWithSuccess("Ereignis entfernt.");
+                  }
+                : draft.eventType === "extra" ? onClose : undefined}
+              onSubmit={(eventType, time, comment) => {
+                if (draft.mode === "edit-event") updateEvent(draft.entry.id, eventType, time, comment);
+                else upsertEvent(eventType, time, comment);
                 closeWithSuccess("Ereignis gespeichert.");
               }}
             />
@@ -458,23 +460,51 @@ function EventForm({
   draft: Extract<TherapyDraft, { mode: "create-event" | "edit-event" }>;
   caseStartedAt: number;
   caseEndedAt: number | null;
-  onSubmit: (eventType: TimelineEventType, time: number) => void;
+  onSubmit: (eventType: TimelineEventType, time: number, comment: string) => void;
   onCancel: () => void;
   onDelete?: () => void;
 }) {
   const eventType = draft.mode === "edit-event" ? draft.entry.eventType : draft.eventType;
   const time = draft.mode === "edit-event" ? draft.entry.time : draft.time;
+  const comment = draft.mode === "edit-event" ? draft.entry.comment : "";
+  const [form] = Form.useForm<{ eventType: TimelineEventType; time: Dayjs; comment: string }>();
+  const selectedType = Form.useWatch("eventType", form) ?? eventType;
   return (
-    <Form<{ eventType: TimelineEventType; time: Dayjs }>
+    <Form<{ eventType: TimelineEventType; time: Dayjs; comment: string }>
+      form={form}
       layout="vertical"
-      initialValues={{ eventType, time: dayjs(time) }}
-      onFinish={({ eventType: selectedType, time: value }) => onSubmit(selectedType, clockToTimestamp(time, value))}
+      initialValues={{ eventType, time: dayjs(time), comment }}
+      onFinish={({ eventType: submittedType, time: value, comment: submittedComment }) => onSubmit(submittedType, clockToTimestamp(time, value), submittedType === "extra" ? submittedComment.trim() : "")}
     >
       <Form.Item label="Ereignis" name="eventType" rules={[{ required: true }]}>
         <Select data-testid="event-type" options={TIMELINE_EVENT_DEFINITIONS.map((definition) => ({ value: definition.type, label: `${definition.symbol} ${definition.label}` }))} />
       </Form.Item>
       <TimelineTimeField caseStartedAt={caseStartedAt} caseEndedAt={caseEndedAt} originalTime={time} />
-      <FormActions onCancel={onCancel} onDelete={onDelete} deleteLabel="Ereignis entfernen" />
+      {selectedType === "extra" ? (
+        <Form.Item
+          label="Kommentar"
+          name="comment"
+          rules={[
+            { required: true, whitespace: true, message: "Bitte einen Kommentar eingeben." },
+            { max: 500, message: "Der Kommentar darf höchstens 500 Zeichen enthalten." },
+          ]}
+        >
+          <Input.TextArea
+            rows={4}
+            maxLength={500}
+            showCount
+            placeholder="Unerwartete Situation kurz dokumentieren"
+            data-testid="event-comment"
+          />
+        </Form.Item>
+      ) : null}
+      <FormActions
+        onCancel={onCancel}
+        onDelete={onDelete}
+        deleteLabel={eventType === "extra" ? "Extra löschen" : "Ereignis entfernen"}
+        deleteButtonLabel={eventType === "extra" ? "Löschen" : "Entfernen"}
+        confirmDelete={draft.mode === "edit-event"}
+      />
     </Form>
   );
 }
@@ -535,17 +565,31 @@ function formatDuration(minutes: number): string {
   return Number.isInteger(minutes) ? `${minutes} Minuten` : `${minutes.toFixed(2).replace(".", ",")} Minuten`;
 }
 
-function FormActions({ onCancel, onDelete, deleteLabel }: { onCancel: () => void; onDelete?: () => void; deleteLabel: string }) {
+function FormActions({
+  onCancel,
+  onDelete,
+  deleteLabel,
+  deleteButtonLabel = "Entfernen",
+  confirmDelete = true,
+}: {
+  onCancel: () => void;
+  onDelete?: () => void;
+  deleteLabel: string;
+  deleteButtonLabel?: string;
+  confirmDelete?: boolean;
+}) {
   return (
     <Flex justify="space-between" gap={12} wrap>
       <Flex gap={8}>
         <Button type="primary" htmlType="submit" data-testid="therapy-save">Speichern</Button>
-        <Button onClick={onCancel}>Abbrechen</Button>
+        <Button onClick={onCancel} data-testid="therapy-cancel">Abbrechen</Button>
       </Flex>
-      {onDelete ? (
-        <Popconfirm title={`${deleteLabel}?`} okText="Entfernen" cancelText="Abbrechen" onConfirm={onDelete}>
-          <Button danger data-testid="therapy-delete">Entfernen</Button>
+      {onDelete && confirmDelete ? (
+        <Popconfirm title={`${deleteLabel}?`} okText={deleteButtonLabel} cancelText="Abbrechen" onConfirm={onDelete}>
+          <Button danger data-testid="therapy-delete">{deleteButtonLabel}</Button>
         </Popconfirm>
+      ) : onDelete ? (
+        <Button danger data-testid="therapy-delete" onClick={onDelete}>{deleteButtonLabel}</Button>
       ) : null}
     </Flex>
   );

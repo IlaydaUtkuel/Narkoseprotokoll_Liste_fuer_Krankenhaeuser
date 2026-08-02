@@ -10,12 +10,14 @@ const patient: PatientBaseData = { patientName: "Test", birthDate: "01.01.2000",
 const caseData: PersistedCase = {
   schemaVersion: CASE_SCHEMA_VERSION,
   caseId: CASE_ID,
+  caseRevision: 4,
+  lastSuccessfullyExportedRevision: null,
   startedAt: START,
   endedAt: START + 10_000,
   measurements: [{ id: "n", kind: "nibp", time: START, systolic: 120, mean: 90, diastolic: 70, createdAt: START, updatedAt: START }],
   medications: [{ id: "m", kind: "medication", administrationType: "bolus", name: "A", startedAt: START, dose: 1, unit: { label: "mg", code: "mg", system: "UCUM", isCustom: false }, concentration: null, endedAt: START + 60_000, ongoing: false, createdAt: START, updatedAt: START }],
   infusions: [{ id: "i", kind: "infusion", name: "I", startedAt: START, amount: 1, unit: { label: "mL", code: "mL", system: "UCUM", isCustom: false }, concentration: null, endedAt: START + 120_000, ongoing: false, createdAt: START, updatedAt: START }],
-  events: [{ id: "e", kind: "event", eventType: "incision", time: START, createdAt: START, updatedAt: START }],
+  events: [{ id: "e", kind: "event", eventType: "incision", comment: "", time: START, createdAt: START, updatedAt: START }],
   lastSavedAt: START + 10_000,
 };
 
@@ -34,6 +36,8 @@ describe("Falldatei-Export", () => {
     expect(snapshot.infusions).toHaveLength(1);
     expect(snapshot.events).toHaveLength(1);
     expect(caseSnapshotFileName(snapshot)).not.toMatch(/[<>:"/\\|?*]/);
+    expect(snapshot).not.toHaveProperty("criticalThresholds");
+    expect(snapshot).not.toHaveProperty("derivedCriticalWarnings");
   });
 
   it("schreibt und schliesst eine echte Datei im gewaehlten Verzeichnis", async () => {

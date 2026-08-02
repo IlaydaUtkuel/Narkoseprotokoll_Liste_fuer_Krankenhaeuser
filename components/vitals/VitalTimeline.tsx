@@ -12,6 +12,8 @@ import { clampValue, normalizeVitalPointerValue, roundToPrecision } from "../../
 import { formatClock, formatVitalNumber } from "../../lib/timeline/format";
 import { computeVitalScaleDomains } from "../../lib/timeline/dynamicYScale";
 import { deriveCheckpointWarnings } from "../../lib/timeline/checkpoints";
+import { deriveCriticalWarnings } from "../../lib/timeline/criticalValues";
+import { loadCriticalSettings, type CriticalSettings } from "../../lib/timeline/criticalSettingsStorage";
 import { toggleEventSelection } from "../../lib/timeline/eventSelection";
 import { maxDocumentableTime, type TimelineTimeError } from "../../lib/timeline/timeValidation";
 import { useCurrentTime } from "../../hooks/useCurrentTime";
@@ -24,6 +26,8 @@ import { LineBand } from "./LineBand";
 import { NibpBand, NibpHandleLayer } from "./NibpBand";
 import { CurrentTimeIndicator } from "./CurrentTimeIndicator";
 import { CheckpointWarningLayer } from "./CheckpointWarningLayer";
+import { CriticalValuesPanel } from "./CriticalValuesPanel";
+import { CriticalWarningLayer } from "./CriticalWarningLayer";
 import { VitalEntryDrawer } from "./VitalEntryDrawer";
 import { TherapyEntryDrawer } from "./TherapyEntryDrawer";
 import { EventLaneTools } from "./TherapyToolbar";
@@ -79,7 +83,7 @@ const EMPTY_POINTER: PlotPointerState = {
   targetId: null,
 };
 
-export function VitalTimeline() {
+export function VitalTimeline({ patientBirthDate = "" }: { patientBirthDate?: string }) {
   const { message } = App.useApp();
   const [containerRef, size] = useElementSize<HTMLDivElement>();
   const svgRef = useRef<SVGSVGElement | null>(null);
@@ -87,6 +91,7 @@ export function VitalTimeline() {
   const therapyEndPlacementRef = useRef<TherapyEndPlacement | null>(null);
 
   const startedAt = useCaseStore((state) => state.startedAt);
+  const caseId = useCaseStore((state) => state.caseId);
   const endedAt = useCaseStore((state) => state.endedAt);
   const measurements = useCaseStore((state) => state.measurements);
   const medications = useCaseStore((state) => state.medications);
@@ -109,6 +114,13 @@ export function VitalTimeline() {
   const [intervalTooltip, setIntervalTooltip] = useState<IntervalTooltipState | null>(null);
   const [selectedCheckpoint, setSelectedCheckpoint] = useState<number | null>(null);
   const [therapyEndPlacement, setTherapyEndPlacement] = useState<TherapyEndPlacement | null>(null);
+  const [criticalSettings, setCriticalSettings] = useState<CriticalSettings | null>(null);
+
+  useEffect(() => {
+    // Separater, nicht-klinischer UI-Support-State; nie Teil des Fallexports.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setCriticalSettings(loadCriticalSettings(caseId, patientBirthDate));
+  }, [caseId, patientBirthDate]);
 
   useEffect(() => {
     const clearEventSelection = (event: KeyboardEvent) => {
@@ -142,6 +154,10 @@ export function VitalTimeline() {
   const checkpointWarnings = useMemo(
     () => deriveCheckpointWarnings(startedAt, endedAt, nowValue, measurements),
     [startedAt, endedAt, nowValue, measurements],
+  );
+  const criticalWarnings = useMemo(
+    () => criticalSettings ? deriveCriticalWarnings(measurements, criticalSettings.thresholds) : [],
+    [criticalSettings, measurements],
   );
 
   const scalarsOf = (kind: VitalKind) =>
@@ -500,6 +516,13 @@ export function VitalTimeline() {
 
   return (
     <>
+      {criticalSettings ? (
+        <CriticalValuesPanel
+          settings={criticalSettings}
+          birthDate={patientBirthDate}
+          onChange={setCriticalSettings}
+        />
+      ) : null}
       <div ref={containerRef} className="timeline-surface" data-testid="vital-timeline">
         {now === null ? <div style={{ height: layout.height }} /> : (
           <svg
@@ -538,6 +561,10 @@ export function VitalTimeline() {
                 onCreateMedication={(time) => openTherapyDraft({ mode: "create-medication", startedAt: time })}
                 onCreateInfusion={(time) => openTherapyDraft({ mode: "create-infusion", startedAt: time })}
                 onPlaceEvent={(eventType, time) => {
+                  if (eventType === "extra") {
+                    openTherapyDraft({ mode: "create-event", eventType, time });
+                    return;
+                  }
                   upsertEvent(eventType, time);
                   setLanePreview(null);
                   message.success("Ereignis platziert.");
@@ -614,6 +641,13 @@ export function VitalTimeline() {
                   ctx={ctx}
                   onUpdate={updateNibp}
                   onEdit={(measurement, part) => openEdit(measurement, part)}
+                />
+                <CriticalWarningLayer
+                  warnings={criticalWarnings}
+                  measurements={measurements}
+                  layout={layout}
+                  xScale={xScale}
+                  yScales={yScales}
                 />
                 <TherapyMarkerLayer
                   layout={layout}

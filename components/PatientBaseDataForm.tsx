@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
-import { Button, Input, InputNumber, Modal, Select } from "antd";
+import { Alert, Button, Input, InputNumber, Modal, Select, Typography } from "antd";
 import { AutosaveFieldStatus } from "./AutosaveFieldStatus";
 import { DateField } from "./DateField";
 import { GlobalSaveStatus } from "./GlobalSaveStatus";
@@ -38,6 +38,20 @@ import type {
 } from "../types/patient";
 import styles from "./PatientBaseDataForm.module.css";
 import { noKnownAllergiesPatch } from "../lib/allergy-toggle";
+import { BasisDataSummary } from "./BasisDataSummary";
+import { loadCase, saveCase } from "../lib/timeline/casePersistence";
+import { syncCriticalSettingsBirthDate } from "../lib/timeline/criticalSettingsStorage";
+import {
+  basisDataChanged,
+  discardBasisEditSession,
+  hasActiveDocumentation,
+  loadOpWorkflow,
+  startBasisEditSession,
+  updateBasisEditDraft,
+  type BasisEditSession,
+} from "../lib/opWorkflow";
+import { useCaseStore } from "../store/anesthesiaCaseStore";
+import { useNewOperationFlow } from "./useNewOperationFlow";
 
 function hasValue(value: unknown): boolean {
   return value !== null && value !== undefined && value !== "";
@@ -76,13 +90,25 @@ function Field({ name, htmlFor, status, error, children }: FieldProps) {
 
 export function PatientBaseDataForm() {
   const router = useRouter();
+  const requestNewOperation = useNewOperationFlow();
   const [data, setData] = useState<PatientBaseData>(() => createEmptyPatientData());
+  const [editSession, setEditSession] = useState<BasisEditSession | null>(null);
+  const editSessionRef = useRef<BasisEditSession | null>(null);
+  const [attempt, setAttempt] = useState<{
+    patch: Partial<PatientBaseData>;
+    statusField: PatientField;
+    oldValue: unknown;
+    newValue: unknown;
+  } | null>(null);
 
   // dataRef spiegelt stets den aktuellen Stand und dient als Quelle beim Speichern.
   const dataRef = useRef<PatientBaseData>(data);
   useEffect(() => {
     dataRef.current = data;
   }, [data]);
+  useEffect(() => {
+    editSessionRef.current = editSession;
+  }, [editSession]);
 
   const { statuses, reportSaving, reportError, markSaved, resetStatuses } = useDebouncedFieldSave();
 
@@ -90,10 +116,15 @@ export function PatientBaseDataForm() {
   useEffect(() => {
     void requestPersistentStorage();
     const stored = loadPatientData();
-    if (stored) {
+    const workflowSession = loadOpWorkflow().basisEditSession;
+    if (workflowSession) {
+      // localStorage/modül taslağı yalnızca mount sonrasında okunabilir.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setEditSession(workflowSession);
+      setData(workflowSession.draftBasisData);
+    } else if (stored) {
       // localStorage darf erst nach dem Mounten gelesen werden, sonst weicht der
       // Client-Zustand vom serverseitig gerenderten HTML ab (Hydration).
-      // eslint-disable-next-line react-hooks/set-state-in-effect
       setData(stored);
       const savedFields = FIELD_ORDER.filter((f) => hasValue(stored[f]));
       if (savedFields.length > 0) markSaved(savedFields);
@@ -106,6 +137,7 @@ export function PatientBaseDataForm() {
   // Die Hauptspeicherung erfolgt jedoch sofort bei jeder Aenderung (siehe applyChange).
   useEffect(() => {
     const flush = () => {
+      if (editSessionRef.current) return;
       try {
         savePatientData(dataRef.current);
       } catch {
@@ -130,6 +162,27 @@ export function PatientBaseDataForm() {
   // laeuft davon unabhaengig ueber den Timer im Hook.
   const applyChange = useCallback(
     (patch: Partial<PatientBaseData>, statusField: PatientField) => {
+      if (editSessionRef.current) {
+        const nextDraft = { ...dataRef.current, ...patch };
+        const nextSession = { ...editSessionRef.current, draftBasisData: nextDraft };
+        dataRef.current = nextDraft;
+        editSessionRef.current = nextSession;
+        setData(nextDraft);
+        setEditSession(nextSession);
+        updateBasisEditDraft(nextDraft);
+        return;
+      }
+      const loadedCase = loadCase();
+      if (loadedCase.status === "ok" && hasActiveDocumentation(loadedCase.data)) {
+        const changedKey = Object.keys(patch)[0] as keyof PatientBaseData;
+        setAttempt({
+          patch,
+          statusField,
+          oldValue: dataRef.current[changedKey],
+          newValue: patch[changedKey],
+        });
+        return;
+      }
       const next: PatientBaseData = {
         ...dataRef.current,
         ...patch,
@@ -193,9 +246,116 @@ export function PatientBaseDataForm() {
   const birthError = validateBirthDate(data.birthDate);
   const opError = validateOpDate(data.operationDate);
 
+  const discardDraft = useCallback(() => {
+    const original = editSessionRef.current?.originalBasisData ?? loadPatientData() ?? createEmptyPatientData();
+    discardBasisEditSession();
+    editSessionRef.current = null;
+    dataRef.current = original;
+    setEditSession(null);
+    setData(original);
+    resetStatuses();
+  }, [resetStatuses]);
+
+  const applyDraft = useCallback(() => {
+    const session = editSessionRef.current;
+    if (!session) return;
+    const nextBirthError = validateBirthDate(session.draftBasisData.birthDate);
+    const nextOpError = validateOpDate(session.draftBasisData.operationDate);
+    if (nextBirthError || nextOpError) return;
+    const committed = { ...session.draftBasisData, updatedAt: new Date().toISOString() };
+    try {
+      savePatientData(committed);
+      const loaded = loadCase();
+      if (loaded.status === "ok") {
+        const now = Date.now();
+        const nextCase = { ...loaded.data, caseRevision: loaded.data.caseRevision + 1, lastSavedAt: now };
+        saveCase(nextCase);
+        useCaseStore.setState({ ...nextCase, saveStatus: "saved" });
+        syncCriticalSettingsBirthDate(loaded.data.caseId, session.originalBasisData.birthDate, committed.birthDate);
+      }
+      discardBasisEditSession();
+      editSessionRef.current = null;
+      dataRef.current = committed;
+      setData(committed);
+      setEditSession(null);
+      markSaved(FIELD_ORDER);
+      router.push("/dokumentation");
+    } catch {
+      reportError("patientName");
+    }
+  }, [markSaved, reportError, router]);
+
+  const requestNewOperationSafely = useCallback(() => {
+    const session = editSessionRef.current;
+    if (session && basisDataChanged(session)) {
+      Modal.confirm({
+        title: "Nicht übernommene Änderungen verwerfen?",
+        okText: "Änderungen verwerfen",
+        cancelText: "Abbrechen",
+        onOk: () => {
+          discardDraft();
+          requestNewOperation();
+        },
+      });
+      return;
+    }
+    requestNewOperation();
+  }, [discardDraft, requestNewOperation]);
+
+  const hasDirtyBasisDraft = Boolean(editSession && basisDataChanged(editSession));
+
+  useEffect(() => {
+    if (!hasDirtyBasisDraft) return;
+    const beforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = "Nicht übernommene Änderungen verwerfen?";
+    };
+    const escape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      Modal.confirm({
+        title: "Nicht übernommene Änderungen verwerfen?",
+        okText: "Änderungen verwerfen",
+        cancelText: "Abbrechen",
+        onOk: discardDraft,
+      });
+    };
+    window.addEventListener("beforeunload", beforeUnload);
+    window.addEventListener("keydown", escape);
+    return () => {
+      window.removeEventListener("beforeunload", beforeUnload);
+      window.removeEventListener("keydown", escape);
+    };
+  }, [discardDraft, hasDirtyBasisDraft]);
+
+  useEffect(() => {
+    if (!hasDirtyBasisDraft) return;
+    const marker = { basisEditGuard: true };
+    window.history.pushState(marker, "", window.location.href);
+    const onPopState = () => {
+      if (window.confirm("Nicht übernommene Änderungen verwerfen?")) {
+        window.removeEventListener("popstate", onPopState);
+        discardDraft();
+        window.history.back();
+      } else {
+        window.history.pushState(marker, "", window.location.href);
+      }
+    };
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, [discardDraft, hasDirtyBasisDraft]);
+
   return (
     <div className={styles.formWrap}>
       <OfflineStatus />
+
+      {editSession ? (
+        <Alert
+          type="info"
+          showIcon
+          message="Sie bearbeiten die Basisdaten des bestehenden OP-Falls."
+          data-testid="basis-edit-mode"
+        />
+      ) : null}
 
       <div className={styles.fields}>
         <Field name="patientName" htmlFor="patientName" status={statuses.patientName}>
@@ -347,21 +507,75 @@ export function PatientBaseDataForm() {
 
       <GlobalSaveStatus statuses={statuses} />
 
-      <Button
-        type="primary"
-        size="large"
-        block
-        className={styles.weiterButton}
-        data-testid="weiter"
-        onClick={() => {
-          if (birthError || opError) return;
-          router.push("/dokumentation");
-        }}
-      >
-        {TEXT.weiterButton}
-      </Button>
+      {editSession ? (
+        <div className={styles.editActions}>
+          <Button type="primary" size="large" onClick={applyDraft} data-testid="apply-basis-edit">
+            Änderungen übernehmen
+          </Button>
+          <Button size="large" onClick={discardDraft} data-testid="discard-basis-edit">
+            Änderungen verwerfen
+          </Button>
+          <Button size="large" onClick={requestNewOperationSafely}>Neue OP</Button>
+        </div>
+      ) : (
+        <>
+          <Button
+            type="primary"
+            size="large"
+            block
+            className={styles.weiterButton}
+            data-testid="weiter"
+            onClick={() => {
+              if (birthError || opError) return;
+              router.push("/dokumentation");
+            }}
+          >
+            {TEXT.weiterButton}
+          </Button>
+          <Button size="large" block onClick={requestNewOperationSafely} data-testid="new-operation">
+            Neue OP
+          </Button>
+          <RemoveAllData onRemoved={handleRemoved} />
+        </>
+      )}
 
-      <RemoveAllData onRemoved={handleRemoved} />
+      <Modal
+        title="Basisdaten dieses OP-Falls ändern?"
+        open={attempt !== null}
+        onCancel={() => setAttempt(null)}
+        footer={
+          <div className="basis-modal-actions">
+            <Button onClick={() => setAttempt(null)}>Abbrechen</Button>
+            <Button onClick={() => { setAttempt(null); requestNewOperation(); }}>Neue OP</Button>
+            <Button
+              type="primary"
+              data-testid="confirm-direct-basis-edit"
+              onClick={() => {
+                if (!attempt) return;
+                const session = startBasisEditSession(dataRef.current, "direct-edit", attempt.patch);
+                editSessionRef.current = session;
+                dataRef.current = session.draftBasisData;
+                setData(session.draftBasisData);
+                setEditSession(session);
+                setAttempt(null);
+              }}
+            >
+              Ja, diesen OP-Fall korrigieren
+            </Button>
+          </div>
+        }
+      >
+        <p>Für diesen OP-Fall liegen bereits Dokumentationsdaten vor. Möchten Sie die Basisdaten desselben OP-Falls korrigieren?</p>
+        <BasisDataSummary data={data} />
+        {attempt ? (
+          <div className={styles.attemptValues} data-testid="basis-attempt-values">
+            <Typography.Text strong>Bisheriger Wert</Typography.Text>
+            <span>{attempt.oldValue === null || attempt.oldValue === "" ? "Nicht angegeben" : String(attempt.oldValue)}</span>
+            <Typography.Text strong>Neuer Wert</Typography.Text>
+            <span>{attempt.newValue === null || attempt.newValue === "" ? "Nicht angegeben" : String(attempt.newValue)}</span>
+          </div>
+        ) : null}
+      </Modal>
     </div>
   );
 }

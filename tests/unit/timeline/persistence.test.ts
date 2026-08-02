@@ -8,6 +8,8 @@ const START = new Date(2026, 6, 31, 19, 0, 0).getTime();
 const sample: PersistedCase = {
   schemaVersion: CASE_SCHEMA_VERSION,
   caseId: CASE_ID,
+  caseRevision: 1,
+  lastSuccessfullyExportedRevision: null,
   startedAt: START,
   endedAt: null,
   measurements: [
@@ -80,6 +82,26 @@ describe("casePersistence", () => {
       events: [],
     });
     expect(migrated?.measurements).toEqual(sample.measurements);
+    expect(migrated).toMatchObject({ caseRevision: 1, lastSuccessfullyExportedRevision: null });
+  });
+
+  it("migriert schemaVersion 4 mit sicherem Revision-Default", () => {
+    const migrated = parseCase({ ...sample, schemaVersion: 4, caseRevision: undefined, lastSuccessfullyExportedRevision: undefined });
+    expect(migrated).toMatchObject({ schemaVersion: CASE_SCHEMA_VERSION, caseRevision: 1, lastSuccessfullyExportedRevision: null });
+    expect(migrated?.measurements).toEqual(sample.measurements);
+  });
+
+  it("migriert schemaVersion 5 Events ohne Kommentar und bewahrt Extra-Kommentare", () => {
+    const oldEvent = { id: "old", kind: "event", eventType: "incision", time: START, createdAt: START, updatedAt: START };
+    const extraEvent = { id: "extra", kind: "event", eventType: "extra", comment: "Schwieriger Atemweg", time: START + 1_000, createdAt: START, updatedAt: START };
+    const migrated = parseCase({ ...sample, schemaVersion: 5, events: [oldEvent, extraEvent] });
+    expect(migrated).toMatchObject({
+      schemaVersion: CASE_SCHEMA_VERSION,
+      events: [
+        { id: "old", comment: "" },
+        { id: "extra", eventType: "extra", comment: "Schwieriger Atemweg" },
+      ],
+    });
   });
 
   it("migriert schemaVersion 2 und erhält vollständige NiBP-Werte", () => {

@@ -180,6 +180,7 @@ function parseEvent(raw: unknown): TimelineEvent | null {
     id: o.id,
     kind: "event",
     eventType: o.eventType as TimelineEvent["eventType"],
+    comment: typeof o.comment === "string" ? o.comment : "",
     time: o.time,
     createdAt,
     updatedAt: isFiniteNumber(o.updatedAt) ? o.updatedAt : createdAt,
@@ -202,7 +203,7 @@ function parseArray<T>(raw: unknown, parser: (item: unknown) => T | null): T[] |
 export function parseCase(raw: unknown): PersistedCase | null {
   if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return null;
   const o = raw as Record<string, unknown>;
-  if (o.schemaVersion !== 1 && o.schemaVersion !== 2 && o.schemaVersion !== 3 && o.schemaVersion !== CASE_SCHEMA_VERSION) return null;
+  if (![1, 2, 3, 4, 5, CASE_SCHEMA_VERSION].includes(Number(o.schemaVersion))) return null;
   if (!Array.isArray(o.measurements)) return null;
 
   const measurements: Measurement[] = [];
@@ -219,9 +220,17 @@ export function parseCase(raw: unknown): PersistedCase | null {
   const events = isLegacy ? [] : parseArray(o.events, parseEvent);
   if (!medications || !infusions || !events) return null;
 
+  const activeDocumentation = caseStartedAt !== null || isFiniteNumber(o.endedAt) || measurements.length > 0 || medications.length > 0 || infusions.length > 0 || events.length > 0;
   return {
     schemaVersion: CASE_SCHEMA_VERSION,
     caseId: typeof o.caseId === "string" ? o.caseId : CASE_ID,
+    caseRevision: isFiniteNumber(o.caseRevision) && o.caseRevision >= 0
+      ? Math.floor(o.caseRevision)
+      : activeDocumentation ? 1 : 0,
+    lastSuccessfullyExportedRevision:
+      isFiniteNumber(o.lastSuccessfullyExportedRevision) && o.lastSuccessfullyExportedRevision >= 0
+        ? Math.floor(o.lastSuccessfullyExportedRevision)
+        : null,
     startedAt: isFiniteNumber(o.startedAt) ? o.startedAt : null,
     endedAt: isFiniteNumber(o.endedAt) ? o.endedAt : null,
     measurements,

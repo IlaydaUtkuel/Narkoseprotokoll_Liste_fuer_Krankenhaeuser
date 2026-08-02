@@ -3,6 +3,7 @@ import { clearCase, loadCase } from "./casePersistence";
 import type { PatientBaseData } from "../../types/patient";
 import type { PersistedCase } from "../../types/vitals";
 import type { CaseExportSnapshot, CaseSaveReceipt } from "./caseExport";
+import { clearCriticalSettings } from "./criticalSettingsStorage";
 
 export const CASE_ARCHIVE_STORAGE_KEY = "sikant-anesthesia-demo-archives:v1";
 
@@ -54,6 +55,7 @@ export function archiveAndCloseCompletedCase(
   const previous = loadCaseArchives();
   archiveStorage().setItem(CASE_ARCHIVE_STORAGE_KEY, JSON.stringify([...previous, archived]));
 
+  clearCriticalSettings(snapshot.caseId);
   clearPatientData();
   clearCase();
   return archived;

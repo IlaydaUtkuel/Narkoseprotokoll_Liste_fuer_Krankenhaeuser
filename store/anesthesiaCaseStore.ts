@@ -1,7 +1,7 @@
 "use client";
 
 import { create } from "zustand";
-import { CASE_ID, CASE_SCHEMA_VERSION } from "../lib/timeline/config";
+import { CASE_ID, CASE_SCHEMA_VERSION, createCaseId } from "../lib/timeline/config";
 import { clearCase, loadCase, saveCase } from "../lib/timeline/casePersistence";
 import { createId, findNearestSameKind, isValidSpo2 } from "../lib/timeline/measurementUtils";
 import { validateTherapyEnd } from "../lib/timeline/therapyTime";
@@ -36,6 +36,9 @@ export type NewInfusion = Omit<InfusionEntry, "id" | "kind" | "createdAt" | "upd
 export interface CaseState {
   hydrated: boolean;
   loadError: boolean;
+  caseId: string;
+  caseRevision: number;
+  lastSuccessfullyExportedRevision: number | null;
   startedAt: number | null;
   endedAt: number | null;
   measurements: Measurement[];
@@ -66,10 +69,12 @@ export interface CaseState {
   updateInfusion: (id: string, input: NewInfusion) => void;
   removeInfusion: (id: string) => void;
   updateTherapyEnd: (kind: "medication" | "infusion", id: string, endedAt: number) => boolean;
-  upsertEvent: (eventType: TimelineEventType, time: number) => TimelineEvent;
+  upsertEvent: (eventType: TimelineEventType, time: number, comment?: string) => TimelineEvent;
   updateEventTime: (id: string, time: number) => void;
-  updateEvent: (id: string, eventType: TimelineEventType, time: number) => void;
+  updateEvent: (id: string, eventType: TimelineEventType, time: number, comment?: string) => void;
   removeEvent: (id: string) => void;
+  markBasisDataChanged: () => void;
+  markSuccessfullyExported: () => void;
   resetCase: () => void;
 }
 
@@ -83,11 +88,13 @@ type Set = (partial: Partial<CaseState>) => void;
 // Schreibt den aktuellen Fall SOFORT nach localStorage (eine Operation) und steuert
 // die Anzeige "Speichert …" -> "Gespeichert".
 function persist(get: Get, set: Set): void {
-  const { startedAt, endedAt, measurements, medications, infusions, events } = get();
+  const { caseId, caseRevision, lastSuccessfullyExportedRevision, startedAt, endedAt, measurements, medications, infusions, events } = get();
   const savedAt = Date.now();
   const payload: PersistedCase = {
     schemaVersion: CASE_SCHEMA_VERSION,
-    caseId: CASE_ID,
+    caseId,
+    caseRevision,
+    lastSuccessfullyExportedRevision,
     startedAt,
     endedAt,
     measurements,
@@ -112,6 +119,9 @@ function persist(get: Get, set: Set): void {
 export const useCaseStore = create<CaseState>((set, get) => ({
   hydrated: false,
   loadError: false,
+  caseId: CASE_ID,
+  caseRevision: 0,
+  lastSuccessfullyExportedRevision: null,
   startedAt: null,
   endedAt: null,
   measurements: [],
@@ -131,10 +141,13 @@ export const useCaseStore = create<CaseState>((set, get) => ({
       set({ hydrated: true, loadError: false });
       return;
     }
-    const { startedAt, endedAt, measurements, medications, infusions, events, lastSavedAt } = result.data;
+    const { caseId, caseRevision, lastSuccessfullyExportedRevision, startedAt, endedAt, measurements, medications, infusions, events, lastSavedAt } = result.data;
     set({
       hydrated: true,
       loadError: false,
+      caseId,
+      caseRevision,
+      lastSuccessfullyExportedRevision,
       startedAt,
       endedAt,
       measurements,
@@ -151,20 +164,24 @@ export const useCaseStore = create<CaseState>((set, get) => ({
 
   startCase: () => {
     if (get().startedAt !== null) return; // Start ist einmalig und aendert sich nicht.
-    set({ startedAt: Date.now() });
+    set({
+      startedAt: Date.now(),
+      caseId: get().caseRevision === 0 ? createCaseId() : get().caseId,
+      caseRevision: get().caseRevision + 1,
+    });
     persist(get, set);
   },
 
   endCase: () => {
     const { startedAt, endedAt } = get();
     if (startedAt === null || endedAt !== null) return;
-    set({ endedAt: Date.now() });
+    set({ endedAt: Date.now(), caseRevision: get().caseRevision + 1 });
     persist(get, set);
   },
 
   updateEndedAt: (time) => {
     if (get().startedAt === null) return;
-    set({ endedAt: time });
+    set({ endedAt: time, caseRevision: get().caseRevision + 1 });
     persist(get, set);
   },
 
@@ -187,7 +204,10 @@ export const useCaseStore = create<CaseState>((set, get) => ({
         : input.kind !== "nibp" && duplicate.kind !== "nibp"
           ? { ...duplicate, time: input.time, value: input.value, updatedAt: now }
           : duplicate;
-      set({ measurements: get().measurements.map((item) => item.id === duplicate.id ? measurement : item) });
+      set({
+        measurements: get().measurements.map((item) => item.id === duplicate.id ? measurement : item),
+        caseRevision: get().caseRevision + 1,
+      });
       persist(get, set);
       return measurement;
     }
@@ -211,7 +231,7 @@ export const useCaseStore = create<CaseState>((set, get) => ({
             createdAt: now,
             updatedAt: now,
           };
-    set({ measurements: [...get().measurements, measurement] });
+    set({ measurements: [...get().measurements, measurement], caseRevision: get().caseRevision + 1 });
     persist(get, set);
     return measurement;
   },
@@ -226,6 +246,7 @@ export const useCaseStore = create<CaseState>((set, get) => ({
       measurements: get().measurements.map((m) =>
         m.id === id && m.kind !== "nibp" ? { ...m, time, value, updatedAt: now } : m,
       ),
+      caseRevision: get().caseRevision + 1,
     });
     persist(get, set);
   },
@@ -237,13 +258,14 @@ export const useCaseStore = create<CaseState>((set, get) => ({
         m.id === id && m.kind === "nibp"
           ? { ...m, time, systolic, mean, diastolic, updatedAt: now }
           : m,
-      ),
+      ).sort((a, b) => a.time - b.time),
+      caseRevision: get().caseRevision + 1,
     });
     persist(get, set);
   },
 
   removeMeasurement: (id) => {
-    set({ measurements: get().measurements.filter((m) => m.id !== id) });
+    set({ measurements: get().measurements.filter((m) => m.id !== id), caseRevision: get().caseRevision + 1 });
     persist(get, set);
   },
 
@@ -259,7 +281,7 @@ export const useCaseStore = create<CaseState>((set, get) => ({
       createdAt: now,
       updatedAt: now,
     };
-    set({ medications: [...get().medications, medication] });
+    set({ medications: [...get().medications, medication], caseRevision: get().caseRevision + 1 });
     persist(get, set);
     return medication;
   },
@@ -273,12 +295,13 @@ export const useCaseStore = create<CaseState>((set, get) => ({
       medications: get().medications.map((item) =>
         item.id === id ? { ...item, ...input, updatedAt: now } : item,
       ),
+      caseRevision: get().caseRevision + 1,
     });
     persist(get, set);
   },
 
   removeMedication: (id) => {
-    set({ medications: get().medications.filter((item) => item.id !== id) });
+    set({ medications: get().medications.filter((item) => item.id !== id), caseRevision: get().caseRevision + 1 });
     persist(get, set);
   },
 
@@ -294,7 +317,7 @@ export const useCaseStore = create<CaseState>((set, get) => ({
       createdAt: now,
       updatedAt: now,
     };
-    set({ infusions: [...get().infusions, infusion] });
+    set({ infusions: [...get().infusions, infusion], caseRevision: get().caseRevision + 1 });
     persist(get, set);
     return infusion;
   },
@@ -308,12 +331,13 @@ export const useCaseStore = create<CaseState>((set, get) => ({
       infusions: get().infusions.map((item) =>
         item.id === id ? { ...item, ...input, updatedAt: now } : item,
       ),
+      caseRevision: get().caseRevision + 1,
     });
     persist(get, set);
   },
 
   removeInfusion: (id) => {
-    set({ infusions: get().infusions.filter((item) => item.id !== id) });
+    set({ infusions: get().infusions.filter((item) => item.id !== id), caseRevision: get().caseRevision + 1 });
     persist(get, set);
   },
 
@@ -327,29 +351,32 @@ export const useCaseStore = create<CaseState>((set, get) => ({
         medications: get().medications.map((item) =>
           item.id === id ? { ...item, endedAt, ongoing: false, updatedAt: now } : item,
         ),
+        caseRevision: get().caseRevision + 1,
       });
     } else {
       set({
         infusions: get().infusions.map((item) =>
           item.id === id ? { ...item, endedAt, ongoing: false, updatedAt: now } : item,
         ),
+        caseRevision: get().caseRevision + 1,
       });
     }
     persist(get, set);
     return true;
   },
 
-  upsertEvent: (eventType, time) => {
+  upsertEvent: (eventType, time, comment = "") => {
     const now = Date.now();
     const event: TimelineEvent = {
       id: createId(),
       kind: "event",
       eventType,
+      comment: eventType === "extra" ? comment.trim() : "",
       time,
       createdAt: now,
       updatedAt: now,
     };
-    set({ events: [...get().events, event] });
+    set({ events: [...get().events, event], caseRevision: get().caseRevision + 1 });
     persist(get, set);
     return event;
   },
@@ -360,20 +387,32 @@ export const useCaseStore = create<CaseState>((set, get) => ({
       events: get().events.map((item) =>
         item.id === id ? { ...item, time, updatedAt: now } : item,
       ),
+      caseRevision: get().caseRevision + 1,
     });
     persist(get, set);
   },
 
-  updateEvent: (id, eventType, time) => {
+  updateEvent: (id, eventType, time, comment = "") => {
     const now = Date.now();
     set({
-      events: get().events.map((item) => item.id === id ? { ...item, eventType, time, updatedAt: now } : item),
+      events: get().events.map((item) => item.id === id ? { ...item, eventType, comment: eventType === "extra" ? comment.trim() : "", time, updatedAt: now } : item),
+      caseRevision: get().caseRevision + 1,
     });
     persist(get, set);
   },
 
   removeEvent: (id) => {
-    set({ events: get().events.filter((item) => item.id !== id) });
+    set({ events: get().events.filter((item) => item.id !== id), caseRevision: get().caseRevision + 1 });
+    persist(get, set);
+  },
+
+  markBasisDataChanged: () => {
+    set({ caseRevision: get().caseRevision + 1 });
+    persist(get, set);
+  },
+
+  markSuccessfullyExported: () => {
+    set({ lastSuccessfullyExportedRevision: get().caseRevision });
     persist(get, set);
   },
 
@@ -381,6 +420,9 @@ export const useCaseStore = create<CaseState>((set, get) => ({
     clearCase();
     if (savedTimer) clearTimeout(savedTimer);
     set({
+      caseId: createCaseId(),
+      caseRevision: 0,
+      lastSuccessfullyExportedRevision: null,
       startedAt: null,
       endedAt: null,
       measurements: [],

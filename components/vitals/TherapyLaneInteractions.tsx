@@ -112,6 +112,7 @@ function LaneTarget({
   };
   const gesture = usePointerGesture({ capture: false, threshold: 9, onTap: place });
   return (
+    <g>
     <rect
       x={layout.plotLeft}
       y={lane.top}
@@ -165,6 +166,11 @@ function LaneTarget({
         onPreview(null);
       }}
     />
+    <g className="therapy-lane-keyboard-focus" pointerEvents="none" aria-hidden>
+      <circle cx={layout.plotLeft + 10} cy={lane.top + 10} r={6} />
+      <path d={`M ${layout.plotLeft + 7} ${lane.top + 10} l 2 2 l 4 -4`} />
+    </g>
+    </g>
   );
 }
 

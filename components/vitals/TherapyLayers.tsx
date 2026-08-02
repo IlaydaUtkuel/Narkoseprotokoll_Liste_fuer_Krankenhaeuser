@@ -524,6 +524,7 @@ function DraggableEventMarker({
   onCommit: (time: number) => void;
 }) {
   const [preview, setPreview] = useState<number | null>(null);
+  const [commentVisible, setCommentVisible] = useState(false);
   const previewRef = useRef<number | null>(null);
   const updatePreview = (clientX: number) => {
     const rect = getSvgRect();
@@ -556,6 +557,8 @@ function DraggableEventMarker({
   const nearRight = x > plotRight - 150;
   const textX = nearRight ? x - 8 : x + 8;
   const anchor = nearRight ? "end" : "start";
+  const extraComment = entry.eventType === "extra" ? entry.comment.trim() : "";
+  const commentX = nearRight ? Math.max(plotLeft, x - 228) : Math.min(plotRight - 220, x + 12);
   return (
     <>
       <line x1={x} y1={laneTop} x2={x} y2={plotBottom} className="timeline-event-line" data-testid="event-line" pointerEvents="none" />
@@ -573,10 +576,14 @@ function DraggableEventMarker({
           fill="transparent"
           role="button"
           tabIndex={0}
-          aria-label={`${definition.label} um ${formatClock(shownTime)} bearbeiten oder horizontal verschieben`}
+          aria-label={`${definition.label} um ${formatClock(shownTime)} bearbeiten oder horizontal verschieben${extraComment ? `. Kommentar: ${extraComment}` : ""}`}
           className="event-marker-focus"
           data-testid={`event-hit-${entry.eventType}`}
           style={{ touchAction: "none", cursor: "ew-resize" }}
+          onPointerEnter={() => setCommentVisible(true)}
+          onPointerLeave={() => setCommentVisible(false)}
+          onFocus={() => setCommentVisible(true)}
+          onBlur={() => setCommentVisible(false)}
           onKeyDown={(event) => {
             if (event.key === "Enter" || event.key === " ") {
               event.preventDefault();
@@ -585,6 +592,21 @@ function DraggableEventMarker({
           }}
           {...gesture}
         />
+        {extraComment && commentVisible && preview === null ? (
+          <foreignObject
+            x={commentX}
+            y={laneTop + 4}
+            width={220}
+            height={72}
+            pointerEvents="none"
+            data-testid={`event-comment-tooltip-${entry.id}`}
+          >
+            <div className="event-comment-tooltip">
+              <strong>Extra</strong>
+              <span>{extraComment}</span>
+            </div>
+          </foreignObject>
+        ) : null}
         {preview !== null ? (
           <g pointerEvents="none" data-testid="event-drag-tooltip">
             <rect x={nearRight ? x - 88 : x + 8} y={markerY + 13} width={80} height={22} rx={5} className="event-drag-tooltip" />

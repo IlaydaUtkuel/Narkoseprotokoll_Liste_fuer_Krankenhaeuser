@@ -44,7 +44,7 @@ export function VitalDocumentation() {
   return (
     <div className="doc-container">
       <CaseHeader patient={patient} />
-      <VitalTimeline />
+      <VitalTimeline patientBirthDate={patient?.birthDate ?? ""} />
       <p className="timeline-hint">
         Tippen Sie in ein Band, um einen Wert zu dokumentieren. Bestehende Punkte lassen sich
         antippen (bearbeiten) oder ziehen (Wert anpassen).

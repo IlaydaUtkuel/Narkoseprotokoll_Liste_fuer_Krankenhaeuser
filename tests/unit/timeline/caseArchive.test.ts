@@ -32,6 +32,8 @@ describe("caseArchive", () => {
     saveCase({
       schemaVersion: CASE_SCHEMA_VERSION,
       caseId: CASE_ID,
+      caseRevision: 2,
+      lastSuccessfullyExportedRevision: null,
       startedAt: START,
       endedAt: START + 30 * 60_000,
       measurements: [],
@@ -60,6 +62,8 @@ describe("caseArchive", () => {
     saveCase({
       schemaVersion: CASE_SCHEMA_VERSION,
       caseId: CASE_ID,
+      caseRevision: 1,
+      lastSuccessfullyExportedRevision: null,
       startedAt: START,
       endedAt: null,
       measurements: [],

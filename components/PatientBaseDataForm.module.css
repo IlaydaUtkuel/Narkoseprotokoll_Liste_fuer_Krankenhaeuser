@@ -49,6 +49,27 @@
   font-weight: 600;
 }
 
+.editActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.editActions > button {
+  flex: 1 1 180px;
+}
+
+.attemptValues {
+  display: grid;
+  grid-template-columns: minmax(120px, auto) 1fr;
+  gap: 6px 12px;
+  margin-top: 16px;
+  padding: 12px;
+  border: 1px solid #dce7e3;
+  border-radius: 8px;
+  background: #f7faf9;
+}
+
 /* Die Einheitenauswahl (kg/lbs) bleibt kompakt wie die bisherige Einheitenbox. */
 .weightInput :global(.ant-input-number-addon) {
   padding: 0;

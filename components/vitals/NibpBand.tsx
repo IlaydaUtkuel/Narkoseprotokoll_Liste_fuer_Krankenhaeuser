@@ -1,10 +1,10 @@
 "use client";
 
-import { useState, type PointerEvent as ReactPointerEvent } from "react";
+import { useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { VITAL_COLOR_VAR } from "../../lib/timeline/config";
 import { formatClock } from "../../lib/timeline/format";
 import { clampValue, roundToPrecision } from "../../lib/timeline/measurementUtils";
-import { timeToX } from "../../lib/timeline/scales";
+import { timeToX, xToTime } from "../../lib/timeline/scales";
 import { usePointerGesture } from "../../hooks/useTimelinePointer";
 import { MeasurementHit } from "./MeasurementHit";
 import type { BandContext } from "./timelineTypes";
@@ -114,16 +114,61 @@ function NibpHandles({
   onEdit: HandleLayerProps["onEdit"];
 }) {
   const [preview, setPreview] = useState<{ part: NibpPart; value: number } | null>(null);
+  const [meanPreview, setMeanPreview] = useState<{ mode: "time" | "mean"; time: number; mean: number } | null>(null);
+  const meanPreviewRef = useRef<typeof meanPreview>(null);
+  const meanDrag = useRef({ active: false, pointerId: -1, startX: 0, startY: 0, mode: null as "time" | "mean" | null });
   const [active, setActive] = useState(false);
-  const cx = timeToX(ctx.xScale, measurement.time);
+  const shownTime = meanPreview?.time ?? measurement.time;
+  const shownMean = meanPreview?.mean ?? measurement.mean;
+  const cx = timeToX(ctx.xScale, shownTime);
   const yScale = ctx.yScales.nibp;
   const shownSystolic = preview?.part === "systolic" ? preview.value : measurement.systolic;
   const shownDiastolic = preview?.part === "diastolic" ? preview.value : measurement.diastolic;
-  const shownMeasurement = { ...measurement, systolic: shownSystolic, diastolic: shownDiastolic };
+  const shownMeasurement = { ...measurement, time: shownTime, mean: shownMean, systolic: shownSystolic, diastolic: shownDiastolic };
   const ySys = endpointY(shownMeasurement, "systolic", ctx);
   const yDia = endpointY(shownMeasurement, "diastolic", ctx);
   const tooltipX = cx > ctx.layout.plotRight - 252 ? cx - 246 : cx + 12;
-  const tooltipY = clampValue(yScale(measurement.mean) - 42, ctx.layout.bandByKind.nibp.top + 3, ctx.layout.bandByKind.nibp.bottom - 39);
+  const tooltipY = clampValue(yScale(shownMean) - 48, ctx.layout.bandByKind.nibp.top + 3, ctx.layout.bandByKind.nibp.bottom - 45);
+
+  const updateMeanPreview = (event: ReactPointerEvent<SVGCircleElement>) => {
+    const state = meanDrag.current;
+    if (!state.active || state.pointerId !== event.pointerId) return;
+    const dx = event.clientX - state.startX;
+    const dy = event.clientY - state.startY;
+    if (!state.mode && Math.hypot(dx, dy) >= 6) state.mode = Math.abs(dx) >= Math.abs(dy) ? "time" : "mean";
+    if (!state.mode) return;
+    const rect = event.currentTarget.ownerSVGElement?.getBoundingClientRect();
+    if (!rect) return;
+    if (state.mode === "time") {
+      const x = clampValue(event.clientX - rect.left, ctx.layout.plotLeft, ctx.layout.plotRight);
+      const time = Math.round(clampValue(xToTime(ctx.xScale, x), ctx.startedAt, ctx.now));
+      const next = { mode: "time" as const, time, mean: measurement.mean };
+      meanPreviewRef.current = next;
+      setMeanPreview(next);
+    } else {
+      const [min, max] = yScale.domain();
+      const mean = roundToPrecision(clampValue(yScale.invert(event.clientY - rect.top), min, max), 0);
+      const next = { mode: "mean" as const, time: measurement.time, mean };
+      meanPreviewRef.current = next;
+      setMeanPreview(next);
+    }
+    setActive(true);
+  };
+
+  const finishMeanDrag = (event: ReactPointerEvent<SVGCircleElement>) => {
+    const state = meanDrag.current;
+    if (!state.active || state.pointerId !== event.pointerId) return;
+    try { event.currentTarget.releasePointerCapture(event.pointerId); } catch { /* ignore */ }
+    const latestPreview = meanPreviewRef.current;
+    if (latestPreview) {
+      onUpdate(measurement.id, latestPreview.time, measurement.systolic, latestPreview.mean, measurement.diastolic);
+    } else {
+      ctx.onPointTap(measurement);
+    }
+    meanDrag.current = { active: false, pointerId: -1, startX: 0, startY: 0, mode: null };
+    meanPreviewRef.current = null;
+    setMeanPreview(null);
+  };
 
   const valueFromPointer = (part: NibpPart, event: ReactPointerEvent<Element>) => {
     const owner = event.currentTarget as SVGGraphicsElement;
@@ -149,7 +194,7 @@ function NibpHandles({
   };
 
   return (
-    <g onPointerEnter={() => setActive(true)} onPointerLeave={() => { if (!preview) setActive(false); }}>
+    <g onPointerEnter={() => setActive(true)} onPointerLeave={() => { if (!preview && !meanPreview) setActive(false); }}>
       <NibpHandle
         part="systolic"
         cx={cx}
@@ -170,17 +215,61 @@ function NibpHandles({
         onCancel={() => setPreview(null)}
         onTap={() => onEdit(measurement, "diastolic")}
       />
+      <circle
+        cx={cx}
+        cy={yScale(shownMean)}
+        r={10}
+        fill="transparent"
+        role="button"
+        tabIndex={0}
+        aria-label="Mittelwert bearbeiten oder horizontal in der Zeit verschieben"
+        data-testid={`nibp-time-handle-${measurement.id}`}
+        style={{ touchAction: "none", cursor: meanPreview?.mode === "time" ? "ew-resize" : "move" }}
+        onPointerDown={(event) => {
+          if (event.pointerType === "mouse" && event.button !== 0) return;
+          meanDrag.current = { active: true, pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, mode: null };
+          try { event.currentTarget.setPointerCapture(event.pointerId); } catch { /* ignore */ }
+          setActive(true);
+        }}
+        onPointerMove={updateMeanPreview}
+        onPointerUp={finishMeanDrag}
+        onPointerCancel={(event) => {
+          if (meanDrag.current.pointerId !== event.pointerId) return;
+          meanDrag.current = { active: false, pointerId: -1, startX: 0, startY: 0, mode: null };
+          meanPreviewRef.current = null;
+          setMeanPreview(null);
+          setActive(false);
+        }}
+        onKeyDown={(event) => {
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            ctx.onPointTap(measurement);
+          }
+        }}
+      />
+      {meanPreview ? <circle cx={cx} cy={yScale(shownMean)} r={6} className="nibp-mean-drag-preview" pointerEvents="none" /> : null}
       {active || preview ? (
         <g pointerEvents="none" data-testid={`nibp-values-${measurement.id}`}>
-          <rect x={tooltipX} y={tooltipY} width={240} height={36} rx={6} className="nibp-value-tooltip" />
+          <rect x={tooltipX} y={tooltipY} width={240} height={42} rx={6} className="nibp-value-tooltip" />
           <text x={tooltipX + 8} y={tooltipY + 15} className="nibp-value-tooltip__values">
-            S {shownSystolic ?? "–"} · M {measurement.mean} · D {shownDiastolic ?? "–"}
+            S {shownSystolic ?? "–"} · M {shownMean} · D {shownDiastolic ?? "–"}
           </text>
-          <text x={tooltipX + 8} y={tooltipY + 29} className="nibp-value-tooltip__unit">mmHg · Klicken zum Eingeben · Ziehen</text>
+          <text x={tooltipX + 8} y={tooltipY + 29} className="nibp-value-tooltip__unit">mmHg · {formatClock(shownTime)}{differentLocalDate(measurement.time, shownTime) ? ` · ${formatLocalDate(shownTime)}` : ""}</text>
+          <text x={tooltipX + 8} y={tooltipY + 39} className="nibp-value-tooltip__unit">Horizontal: Zeit · Vertikal: Mittel</text>
         </g>
       ) : null}
     </g>
   );
+}
+
+function differentLocalDate(left: number, right: number): boolean {
+  const a = new Date(left);
+  const b = new Date(right);
+  return a.getFullYear() !== b.getFullYear() || a.getMonth() !== b.getMonth() || a.getDate() !== b.getDate();
+}
+
+function formatLocalDate(timestamp: number): string {
+  return new Intl.DateTimeFormat("de-DE").format(timestamp);
 }
 
 function NibpHandle({

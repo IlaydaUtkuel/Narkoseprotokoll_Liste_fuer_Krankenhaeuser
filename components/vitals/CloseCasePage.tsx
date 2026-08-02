@@ -18,6 +18,9 @@ import {
 } from "../../lib/timeline/caseExport";
 import { formatClock } from "../../lib/timeline/format";
 import { CaseTimelinePreview } from "./CaseTimelinePreview";
+import { loadOpWorkflow, clearOpWorkflow } from "../../lib/opWorkflow";
+import { saveCase } from "../../lib/timeline/casePersistence";
+import { useCaseStore } from "../../store/anesthesiaCaseStore";
 
 const CONFIRMATION = "Ich habe die Falldaten und die Dokumentation geprüft und möchte den Fall speichern.";
 
@@ -93,7 +96,19 @@ export function CloseCasePage() {
       const receipt = directory
         ? await writeSnapshotToDirectory(snapshot, directory)
         : await shareOrDownloadSnapshot(snapshot);
-      archiveAndCloseCompletedCase(snapshot, receipt);
+      const exportedSnapshot = {
+        ...snapshot,
+        lastSuccessfullyExportedRevision: snapshot.caseRevision,
+      };
+      saveCase(exportedSnapshot);
+      const pendingAction = loadOpWorkflow().pendingAfterSaveAction;
+      archiveAndCloseCompletedCase(exportedSnapshot, receipt);
+      clearOpWorkflow();
+      useCaseStore.getState().resetCase();
+      if (pendingAction === "start-new-case") {
+        router.replace("/");
+        return;
+      }
       setSavedFile(receipt.fileName);
     } catch (reason) {
       if (!isPickerCancellation(reason)) setError(reason instanceof Error ? reason.message : "Die Falldatei konnte nicht gespeichert werden.");

@@ -82,6 +82,7 @@ export const TIMELINE_EVENT_TYPES = [
   "suture",
   "emergenceEnd",
   "patientOut",
+  "extra",
 ] as const;
 
 export type TimelineEventType = (typeof TIMELINE_EVENT_TYPES)[number];
@@ -90,6 +91,7 @@ export interface TimelineEvent {
   id: string;
   kind: "event";
   eventType: TimelineEventType;
+  comment: string;
   time: number;
   createdAt: number;
   updatedAt: number;
@@ -99,6 +101,8 @@ export interface TimelineEvent {
 export interface PersistedCase {
   schemaVersion: number;
   caseId: string;
+  caseRevision: number;
+  lastSuccessfullyExportedRevision: number | null;
   startedAt: number | null;
   endedAt: number | null;
   measurements: Measurement[];

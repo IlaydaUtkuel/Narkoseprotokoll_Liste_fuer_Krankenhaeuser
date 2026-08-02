@@ -603,6 +603,45 @@ test("Ereignissymbol toggelt per Maus und iPad-Touch und bleibt nach Platzierung
   await expect(tool).toHaveAttribute("aria-pressed", "false");
 });
 
+test("Extra-Ereignis öffnet einen Kommentar-Entwurf, persistiert den Text und lässt sich löschen", async ({ page }) => {
+  await page.goto("/dokumentation");
+  await seedStartedCase(page, 20);
+  const tool = page.getByTestId("select-event-extra");
+  await tool.click();
+  await expect(tool).toHaveAttribute("aria-pressed", "true");
+
+  await tapLaneFraction(page, "event", 0.22);
+  await expect(page.getByTestId("event-comment")).toBeVisible();
+  await page.getByTestId("event-comment").fill("Noch nicht speichern");
+  await page.getByTestId("therapy-delete").click();
+  await expect(page.getByTestId("event-extra")).toHaveCount(0);
+  await expect(tool).toHaveAttribute("aria-pressed", "true");
+
+  await tapLaneFraction(page, "event", 0.26);
+  await page.getByTestId("event-comment").fill("Unerwartete schwierige Maskenbeatmung");
+  await page.getByTestId("therapy-save").click();
+  await expect(page.getByTestId("event-extra")).toBeVisible();
+  await expect(tool).toHaveAttribute("aria-pressed", "true");
+
+  const marker = page.getByTestId("event-hit-extra");
+  await marker.hover();
+  await expect(page.locator('[data-testid^="event-comment-tooltip-"]')).toContainText("Unerwartete schwierige Maskenbeatmung");
+  await marker.click();
+  await expect(page.getByTestId("event-comment")).toHaveValue("Unerwartete schwierige Maskenbeatmung");
+  await page.getByTestId("event-comment").fill("Maßnahme erfolgreich dokumentiert");
+  await page.getByTestId("therapy-save").click();
+
+  await page.reload();
+  const reloadedMarker = page.getByTestId("event-hit-extra");
+  await reloadedMarker.hover();
+  await expect(page.locator('[data-testid^="event-comment-tooltip-"]')).toContainText("Maßnahme erfolgreich dokumentiert");
+  await reloadedMarker.click();
+  await page.getByTestId("therapy-delete").click();
+  await page.locator(".ant-popconfirm").getByRole("button", { name: "Löschen", exact: true }).click();
+  await page.reload();
+  await expect(page.getByTestId("event-extra")).toHaveCount(0);
+});
+
 test("relative 5-Minuten-Warnung öffnet den exakten Bandwert und verschwindet erst bei vier vollständigen Vitalwerten", async ({ page }) => {
   await page.goto("/dokumentation");
   const startedAt = await seedStartedCase(page, 6);
