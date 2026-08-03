@@ -146,6 +146,7 @@ test("Neue OP bewahrt den Fall bei Exportabbruch und leert erst nach echtem Expo
 
   await page.evaluate(() => { (window as typeof window & { __cancelPicker?: boolean }).__cancelPicker = false; });
   await page.getByTestId("choose-directory").click();
+  await page.getByTestId("completeness-acknowledgement").click();
   await page.getByTestId("archive-confirmation").click();
   await page.getByTestId("archive-save").click();
   await expect(page.getByRole("heading", { name: "Basisdaten des Narkosefalls" })).toBeVisible();

@@ -11,6 +11,7 @@ import { displayEndTime } from "../../lib/timeline/therapyUtils";
 import { usePointerGesture } from "../../hooks/useTimelinePointer";
 import type { TimelineLayout } from "../../lib/timeline/geometry";
 import type { InfusionEntry, MedicationEntry, TimelineEvent } from "../../types/vitals";
+import { MIN_INTERACTIVE_TARGET_PX } from "../../lib/timeline/config";
 
 const MEDICATION_COLORS = ["#722ed1", "#9254de", "#531dab", "#b37feb"];
 const INFUSION_COLORS = ["#087f8c", "#0891b2", "#0e7490", "#155e75"];
@@ -421,7 +422,7 @@ function TherapyMarker({
           }
         }}
       >
-        <rect x={nearRight ? x - 150 : x - 10} y={markerY - 13} width={150} height={28} rx={6} fill="transparent" data-testid={`therapy-hit-${testId}`} />
+        <rect x={nearRight ? x - 150 : x - 10} y={markerY - MIN_INTERACTIVE_TARGET_PX / 2} width={150} height={MIN_INTERACTIVE_TARGET_PX} rx={8} fill="transparent" data-testid={`therapy-hit-${testId}`} />
         <circle cx={x} cy={markerY} r={8} fill="transparent" />
         <circle cx={x} cy={markerY} r={6} className="therapy-marker-dot" fill={visual.color} />
         <text x={textX} y={markerY - 2} textAnchor={textAnchor} className="therapy-marker-label">{label}</text>
@@ -442,8 +443,8 @@ function TherapyMarker({
             }
           }}
         >
-          <rect x={Math.min(plotRight - 126, Math.max(x + 8, timeToX(xScale, maxTime) - 126))} y={markerY + 15} width={126} height={22} rx={5} />
-          <text x={Math.min(plotRight - 118, Math.max(x + 16, timeToX(xScale, maxTime) - 118))} y={markerY + 30}>Anwendung beenden</text>
+          <rect x={Math.min(plotRight - 126, Math.max(x + 8, timeToX(xScale, maxTime) - 126))} y={markerY + 8} width={126} height={MIN_INTERACTIVE_TARGET_PX} rx={5} />
+          <text x={Math.min(plotRight - 118, Math.max(x + 16, timeToX(xScale, maxTime) - 118))} y={markerY + 35}>Anwendung beenden</text>
         </g>
       ) : endX !== null ? (
         <g data-testid={`${testId}-end-handle`}>
@@ -451,7 +452,7 @@ function TherapyMarker({
           <circle
             cx={endX}
             cy={markerY}
-            r={14}
+            r={MIN_INTERACTIVE_TARGET_PX / 2}
             fill="transparent"
             role="button"
             tabIndex={0}
@@ -568,11 +569,11 @@ function DraggableEventMarker({
         <text x={textX} y={markerY - 2} textAnchor={anchor} className="event-marker-label" pointerEvents="none">{definition.label}</text>
         <text x={textX} y={markerY + 11} textAnchor={anchor} className="event-marker-time" pointerEvents="none">{formatClock(shownTime)}</text>
         <rect
-          x={x - 14}
-          y={markerY - 10}
-          width={28}
-          height={28}
-          rx={14}
+          x={x - MIN_INTERACTIVE_TARGET_PX / 2}
+          y={markerY - MIN_INTERACTIVE_TARGET_PX / 2}
+          width={MIN_INTERACTIVE_TARGET_PX}
+          height={MIN_INTERACTIVE_TARGET_PX}
+          rx={MIN_INTERACTIVE_TARGET_PX / 2}
           fill="transparent"
           role="button"
           tabIndex={0}

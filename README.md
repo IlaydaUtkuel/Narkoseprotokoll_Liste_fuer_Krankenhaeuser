@@ -1,404 +1,164 @@
-# Narkoseprotokoll Demo – Basisdaten des Narkosefalls
+# Sikant Narkoseprotokoll-Demo
 
-Webanwendung zur Dokumentation eines **fiktiven Narkosefalls**. Der Ablauf ist
-zweistufig:
+Lokale Next.js-Anwendung zur Dokumentation eines ausschließlich **fiktiven** Narkosefalls. Die Anwendung verbindet Basisdaten, eine gemeinsame SVG-Zeitachse für vier Vitalparameter, Therapien und Ereignisse sowie einen kontrollierten Fallabschluss mit echtem JSON-Dateiexport.
 
-1. **`/` – Basisdaten des Narkosefalls**: Formular mit acht Feldern, feldweisem
-   Autosave, Datumsvalidierung und Offline-Fähigkeit. Das leere OP-Datum öffnet
-   den Kalender beim heutigen Tag und bietet die Direktwahl `Heute`.
-2. **`/dokumentation` – Vitalparameter-Zeitgrafik** (nach „Okay und Weiter“): eine
-   gemeinsame SVG-Zeitgrafik mit Therapie-/Ereignis-Lanes und vier Baendern
-   (SpO₂, Herzfrequenz, NiBP, Temperatur), Start-/Ende-/Jetzt-Logik und Eingabe
-   per Maus, Finger und Apple Pencil.
-
-> ⚠️ **Nur fiktive Demodaten.** Es dürfen niemals echte Patientendaten
-> eingegeben oder gespeichert werden.
-
-## Projektziel
-
-Erfassung der acht Basisfelder eines Narkosefalls in einem ruhigen,
-professionellen Formular, das
-
-- auf einem aktuellen iPad in Safari und auf dem Desktop in aktuellem Chrome läuft,
-- Eingaben pro Feld automatisch lokal speichert und nach Neuladen/Neustart
-  wiederherstellt,
-- nach dem ersten Online-Aufruf auch offline erneut geöffnet werden kann,
-- technisch so aufgebaut ist, dass später **Pointer Events** (Maus, Finger,
-  Apple Pencil) für eine grafische Vitalwertkurve ergänzt werden können.
-
-## Verwendete Technologien
-
-- **Next.js 16** (App Router) + **React 19**
-- **TypeScript** (Strict Mode)
-- **Ant Design 6** als zentrale UI-Bibliothek (deutsche Lokalisierung, ruhiges
-  medizinisches Theme, grüner Erfolgsstatus)
-- **dayjs** für die Datumsfelder
-- **d3-scale** – Zeit↔X- und Wert↔Y-Umrechnung (`scaleTime`, `scaleLinear`)
-- **d3-shape** – SpO₂-Step-Linie/-Flaeche und Linienpfade (`curveStepAfter`, `line`, `area`)
-- **Zustand** – Fall-State (Start-/Endzeit, Messungen, Medikamente, Infusionen,
-  Ereignisse und Speicherstatus) mit localStorage-Persistenz
-- **`localStorage`** für Basisdaten und Vitaldaten (kein Backend, keine Datenbank)
-- **Serwist** (`@serwist/next`) für Service Worker / PWA
-- **Vitest** + **Testing Library** (Unit-/Komponententests)
-- **Playwright** (End-to-End-Tests, Chromium + iPad-naher Viewport)
-- **npm** als Paketmanager
+> **Wichtiger Hinweis:** Diese Demo ist kein Medizinprodukt und enthält keine Diagnose-, Therapie- oder Dosierungsempfehlung. Kritische Hinweise und Vollständigkeitsmeldungen werden ausschließlich aus den eingegebenen Daten und der vorhandenen Konfiguration abgeleitet. Für die Demo dürfen keine realen Patientendaten verwendet werden.
 
 ## Voraussetzungen
 
-- **Node.js ≥ 20** (getestet mit Node 24) und npm
+- Node.js 20 oder neuer
+- npm
+- Chromium für die automatisierten Playwright-Tests
 
-## Installationsschritte
-
-```bash
-npm install
-npx playwright install chromium   # Browser für die E2E-Tests
-```
-
-Optional (App-Icons neu erzeugen):
+## Installation
 
 ```bash
-npm run generate-icons
+npm ci
+npx playwright install chromium
 ```
 
-## Startbefehl (Entwicklung)
+## Lokaler Start
+
+Entwicklung:
 
 ```bash
 npm run dev
 ```
 
-Danach [http://localhost:3000](http://localhost:3000) öffnen.
+Danach ist die Anwendung unter [http://localhost:3000](http://localhost:3000) erreichbar.
 
-Produktionsbetrieb lokal:
+## Build
 
 ```bash
 npm run build
 npm run start
 ```
 
-> Hinweis: Der Produktions-Build nutzt bewusst **webpack**
-> (`next build --webpack`), weil der Service Worker über das webpack-basierte
-> Serwist-Plugin erzeugt wird. Der Service Worker ist im Entwicklungsmodus
-> deaktiviert und nur im Produktions-Build aktiv.
+Der Build verwendet bewusst webpack, weil der Serwist-Service-Worker damit erzeugt wird. Der Service Worker ist im Entwicklungsmodus deaktiviert.
 
-## Testbefehle
+## Tests
 
 ```bash
-npm run lint        # ESLint
-npm run test        # Unit-/Komponententests (Vitest)
-npm run build       # Produktions-Build (inkl. TypeScript-Prüfung + Service Worker)
-npm run test:e2e    # End-to-End-Tests (Playwright)
+npm run lint
+npm run test
+npm run build
+npm run test:e2e
 ```
 
-Für `npm run test:e2e` muss zuvor `npm run build` gelaufen sein – Playwright
-startet den Produktionsserver (Port 3100) mit `npm run start`. Es gibt zwei
-Projekte: `chromium` (Desktop) und `ipad-viewport` (iPad-naher Viewport 810×1080
-mit Touch). Für WebKit zusaetzlich `npx playwright install webkit`.
+`npm run test:e2e` startet den zuvor gebauten Produktionsstand auf Port 3100. Die Standardkonfiguration enthält ein Desktop-Projekt mit Chromium bei 1280×800 und ein iPad-nahes Chromium-Projekt bei 810×1080 mit Touch. Erfolgreiche Standardtests erzeugen keine Video-Artefaktflut; Videos werden nur bei Fehlern behalten.
 
-**Videos** werden für **alle** Tests erzeugt (auch erfolgreiche Haupt-Flows,
-`video: "on"`) und liegen unter:
+Die letzte vollständige Verifikation umfasst **222 Vitest-Tests in 39 Dateien** und **94 Playwright-Läufe in zwei Projekten**. Die Zahlen müssen nach Änderungen aus den tatsächlichen Ausgaben von `npm run test` und `npx playwright test --list` aktualisiert werden.
+
+## Bedienung
+
+1. Auf `/` werden die Basisdaten eingegeben oder der eindeutig markierte fiktive Demofall geladen.
+2. `Okay und Weiter` öffnet `/dokumentation`.
+3. `Start` setzt die unveränderliche Startzeit des Falls.
+4. Werte werden direkt in den vier Vitalbändern dokumentiert. Medikamente, Infusionen und Flüssigkeiten werden durch Auswahl eines Zeitpunkts in ihrer jeweiligen Lane angelegt.
+5. Ereignissymbole werden in `Phasen und Ereignisse` gewählt und anschließend auf derselben Zeitachse platziert. Ein erneuter Klick auf das aktive Symbol oder `Escape` beendet die Auswahl; nach einer Platzierung bleibt das Werkzeug für weitere gleichartige Ereignisse aktiv.
+6. `Eingriff beenden` speichert `endedAt`. Danach führt `Speichern und Schließen` zur schreibgeschützten Kontrolle und zum Dateiexport.
+
+Die sechs Ereignistypen sind `Beginn Anästhesie`, `Schnitt`, `Naht`, `Ende Ausleitung`, `Patient aus dem Saal` und `Extra`. Derselbe Typ kann mehrfach platziert werden. `Extra` besitzt zusätzlich einen frei bearbeitbaren Kommentar und kann wie andere Ereignisse verschoben, bearbeitet und gelöscht werden.
+
+## Vital-Timeline
+
+Alle Therapie-Lanes und Vitalbänder liegen in einem gemeinsamen SVG und verwenden dieselbe Zeitkoordinate. SpO₂ wird als Step-Linie dargestellt, Herzfrequenz und Temperatur als Linienverlauf. NIBP besteht aus Mittelwertpunkt sowie getrennt editierbaren systolischen und diastolischen Griffen; `mmHg` wird als feste Einheit gezeigt und nicht an jedem Wert wiederholt.
+
+Jedes Vitalband berechnet seine Y-Skala aus den im sichtbaren Zeitbereich vorhandenen Werten. NIBP berücksichtigt Systole, Mittelwert und Diastole gemeinsam. Endliche negative, kleine oder große Zahlen werden nicht durch medizinische Hardlimits abgeschnitten. Ein visueller Rand verhindert, dass Einzel- oder Extremwerte am Bandrand kleben.
+
+Die relativen Fünf-Minuten-Kontrollpunkte beginnen bei `startedAt + 5 Minuten`. Fehlt an einem abgeschlossenen Kontrollpunkt mindestens eines der vier Vitalbänder oder ist ein NIBP-Datensatz unvollständig, erscheinen eine rote Linie und ein zugänglicher Warnbutton. Diese Hinweise sind abgeleiteter UI-Zustand und werden nicht persistiert.
+
+## Desktop- und iPad-Unterstützung
+
+Das Layout vermeidet horizontalen Seiten-Overflow und ist für Desktop 1280×800 sowie den automatisierten iPad-nahen Viewport 810×1080 geprüft. Der iPad-Viewport-Test läuft auf diesem Windows-System mit Chromium. Er ist **kein** Ersatz für Safari, iPadOS oder ein physisches Gerät.
+
+Die noch ausstehende reale Hardwareabnahme ist in [docs/ipad-acceptance-test.md](docs/ipad-acceptance-test.md) vorbereitet.
+
+## Pointer-, Touch- und Pen-Unterstützung
+
+Die Anwendung verwendet bereits Pointer Events für Maus, Finger und Stift: `pointerdown`, `pointermove`, `pointerup`, `pointercancel` und bei Drag-Interaktionen Pointer Capture. Kurze Gesten werden als Tap, größere Bewegungen als Drag oder vertikales Scrollen ausgewertet. Ereigniswerkzeuge sowie kleine Warn- und Ereignismarker besitzen mindestens 44×44 CSS-Pixel große Interaktionsflächen; sichtbare Symbole dürfen kleiner bleiben. Tastaturziele unterstützen Fokus, Enter und Space, Toggle-Werkzeuge zusätzlich `aria-pressed` und `Escape`.
+
+Ein echter Apple Pencil kann in dieser Umgebung nicht automatisiert geprüft werden. Der `pen`-Pfad ist durch Unit- und Browser-Events abgedeckt, die physische Prüfung bleibt dennoch erforderlich.
+
+## Datenhaltung und Persistence
+
+Basisdaten und Falldokumentation werden sofort nach einer abgeschlossenen Änderung in `localStorage` geschrieben. Die 600-ms-Verzögerung betrifft nur den sichtbaren Wechsel von `Wird gespeichert …` zu `✓ Gespeichert`; sie verzögert nicht das Schreiben. Daten bleiben auf denselben Browser, dasselbe Gerät und dieselbe Origin beschränkt. Es gibt kein Backend und keine Synchronisation.
+
+Die aktuelle Fall-Schema-Version ist **6**. Der Parser akzeptiert Version 1 bis 5 und überführt sie in Version 6:
+
+- Version 1 bewahrt Startzeit und Messungen; damals nicht vorhandene Therapien und Ereignisse werden als leere Listen ergänzt.
+- Version 2 bewahrt vollständige NIBP-Dreierwerte.
+- Version 3 unterstützt vorübergehend offene systolische und diastolische NIBP-Werte.
+- Version 4 erhält sichere Defaults für Fallrevision und Exportrevision.
+- Version 5 erhält vorhandene Ereignisse, ergänzt fehlende Kommentare leer und bewahrt `Extra`-Kommentare.
+- Ältere Therapieeinheiten werden in die aktuelle strukturierte Einheit überführt.
+
+Beschädigtes JSON wird nicht still überschrieben und bringt die Anwendung nicht zum Absturz. Start, Ende, Messungen, Therapien, Ereignisse und Revisionen werden nach Reload wiederhergestellt. Kritische Threshold-Einstellungen liegen getrennt pro Fall und sind ausdrücklich **nicht** Teil des Fall-Exports. Vollständigkeits- und Warnresultate werden nicht gespeichert, sondern bei jeder Anzeige neu aus den Falldaten berechnet.
+
+## Export
+
+Nach dem Fallende zeigt `/abschluss` zuerst Basisdaten, eine schreibgeschützte echte Timeline-Vorschau und die `Vollständigkeitsprüfung`. Erst danach folgt die Dateiauswahl und die letzte Bestätigung.
+
+- Unterstützt der Browser `window.showDirectoryPicker`, öffnet `Ordner auswählen` den echten Systemdialog und schreibt die JSON-Datei über die File System Access API in den gewählten Ordner.
+- Unterstützt ein Gerät Dateifreigabe über `navigator.canShare({ files })`, wird die reale JSON-Datei über Web Share angeboten, beispielsweise für `In Dateien sichern` auf iPadOS.
+- Andernfalls wird eine reale JSON-Datei als Download bereitgestellt.
+
+Abbruch oder Schreibfehler erzeugen keine Erfolgsmeldung, archivieren den Fall nicht und löschen keine aktiven Daten. Erst ein erfolgreich gestarteter Datei- oder Freigabeweg aktualisiert die Exportrevision, archiviert und schließt den Fall. Der Export enthält Schema-Version, Basisdaten, Fall-ID, Start/Ende, Messungen einschließlich NIBP, Therapien, Ereignisse und Archivierungszeit.
+
+## Fiktiver Demofall
+
+`Fiktiven Demofall laden` erzeugt mit einem Klick einen ausschließlich fiktiven, beendeten Fall im normalen Schema. Er enthält fiktive Basisdaten, mehrere Vitalsets, vollständige NIBP-Dreierwerte, Bolus und kontinuierliche Gabe, eine Infusion, mehrere Ereignisse, einen kommentierten `Extra`-Eintrag, kritische Beispielwerte sowie kontrolliert offene Dokumentationshinweise. Im Kopf bleibt dauerhaft sichtbar:
 
 ```text
-test-results/<test-ordner>/video.webm
+FIKTIVER DEMOFALL – Keine realen Patientendaten
 ```
 
-## Erklärung des Autosaves
+Existieren bereits lokale Angaben oder eine aktive Dokumentation, verlangt das Laden vorher eine ausdrückliche Bestätigung. Reload, Export und `Neuen Fall starten` verwenden dieselben produktiven Persistence- und Sicherheitswege wie ein normaler Fall; das Exportschema erhält kein Demo-Sonderfeld.
 
-Jedes der acht Felder speichert **eigenständig** mit einem **eigenen
-Debounce-Timer**:
+## Vollständigkeitsprüfung
 
-1. Bei einer Änderung erscheint an der Zeile sofort der neutrale Status
-   `Wird gespeichert …`.
-2. Erst **2,5 Sekunden** nach der letzten Änderung dieses Feldes wird der Wert
-   nach `localStorage` geschrieben. Jede weitere Eingabe innerhalb dieser Zeit
-   startet die Wartezeit für dieses Feld neu.
-3. Nach dem erfolgreichen Schreiben erscheint rechts neben dem Feld das grüne
-   `✓ Gespeichert`.
-4. Schlägt das Speichern fehl, erscheint stattdessen `Speichern fehlgeschlagen`
-   – Fehler werden nicht still ignoriert.
+Die zentrale Prüfung ist eine reine, testbare Auswertung vorhandener Daten. Sie kontrolliert:
 
-Unterhalb der Felder zeigt ein Gesamtstatus:
+- formale Basisdaten nach den vorhandenen Datumsregeln,
+- Start- und Endstatus,
+- abgeleitete offene Fünf-Minuten-Vitalcheckpoint-Hinweise,
+- nicht beendete kontinuierliche Medikamentengaben und Infusionen,
+- tatsächlich unvollständige Therapieeinheiten,
+- optional ausdrücklich konfigurierte Pflicht-Ereignisse.
 
-- `✓ Alles dauerhaft automatisch gespeichert` (grün), wenn nichts mehr aussteht,
-- `Änderungen werden automatisch gespeichert …`, solange ein Feld noch wartet,
-- eine klare Fehlermeldung, falls ein Speichern fehlgeschlagen ist (dann wird der
-  grüne Erfolgsstatus nicht angezeigt).
+Standardmäßig ist kein medizinisches Ereignis verpflichtend. Hinweise sind keine klinische Bewertung und keine Empfehlung. Bei offenen Punkten kann zur passenden Seite zurückgekehrt oder nach bewusster Kenntnisnahme mit dem Export fortgefahren werden.
 
-„Dauerhaft gespeichert“ bedeutet hier: **lokal in diesem Browser** – nicht auf
-einem Server und nicht auf anderen Geräten.
+## Kritische Vitalwertwarnungen
 
-## Erklärung von `localStorage`
+Kritische Hinweise werden aus benutzerseitig konfigurierbaren Thresholds und vorhandenen Messungen abgeleitet. Automatische Erwachsenenvorgaben sind eine visuelle Orientierung, keine medizinische Entscheidung. Die Oberfläche zeigt die aus dem Geburtsdatum berechnete Altersnotiz. Das Warnsymbol besitzt einen klaren zugänglichen Namen und eine sichtbare Fokusmarkierung; die Erklärung ist nicht nur durch Farbe codiert. Die Thresholds und abgeleiteten Warnungen werden nicht in den Fall-Export geschrieben.
 
-- Die Daten liegen unter dem Schlüssel
-  `sikant-anesthesia-demo.patient-base-data.v1`.
-- Beim Laden der Startseite werden gespeicherte Daten gelesen, einfach validiert
-  und wiederhergestellt. **Beschädigtes/ungültiges JSON** führt nicht zum
-  Absturz – es wird auf einen leeren Zustand zurückgegriffen.
-- Lese- und Schreibfehler werden mit `try/catch` behandelt. Auch leere Werte
-  werden korrekt gespeichert und wiederhergestellt.
-- Sofern der Browser es unterstützt, wird einmalig `navigator.storage.persist()`
-  als Best-Effort angefragt; die App funktioniert auch bei Ablehnung.
+## Barrierefreiheit
 
-## Erklärung der PWA-/Offline-Funktion
+- Ereignis-, Warn- und zentrale Timeline-Ziele besitzen große Hitflächen.
+- Toggle-Zustände verwenden `aria-pressed` und eine zusätzliche sichtbare Markierung.
+- Fokuszustände sind sichtbar; wichtige SVG-Ziele sind per Tastatur erreichbar.
+- Warnungen besitzen Text und zugängliche Namen statt reiner Farbcodierung.
+- `@axe-core/playwright` prüft Basisdaten, Dokumentation und Abschluss auf schwere und kritische WCAG-Verstöße.
+- Extra-Kommentare sind per Hover und Fokus erreichbar.
 
-- Die App ist eine **PWA** mit Web-App-Manifest (`/manifest.webmanifest`) und
-  neutralen, selbst erstellten Icons.
-- Beim ersten **Online**-Aufruf speichert der **Service Worker** alle zum Öffnen
-  der Startseite nötigen Dateien (Precache inkl. der vorgerenderten Routen `/`
-  und `/dokumentation`).
-- Danach lassen sich `/` und `/dokumentation` auch **ohne Internetverbindung**
-  erneut öffnen; die bereits gespeicherten Formulardaten werden offline geladen
-  und können offline bearbeitet und gespeichert werden.
-- Bei fehlender Verbindung erscheint der unaufdringliche Hinweis
-  `Offline – Änderungen werden lokal gespeichert`; er verschwindet automatisch,
-  sobald wieder eine Verbindung besteht.
-- Eine Serversynchronisation gibt es in dieser Stufe bewusst nicht.
+Axe ersetzt keine Prüfung mit Screenreader, realer Tastatur, Safari, Touch oder Apple Pencil. Diese Punkte bleiben Teil der manuellen Abnahme.
 
-## Vitalparameter-Zeitgrafik (`/dokumentation`)
+## Agentic Development Workflow
 
-### Warum ein einziges SVG?
-
-Die vier Baender (SpO₂, Herzfrequenz, NiBP, Temperatur) sind **kein** Verbund aus
-vier unabhaengigen Charts, sondern **ein gemeinsames SVG**. Nur so teilen sich
-alle Baender exakt dieselbe X-Achse: derselbe Zeitpunkt liegt in allen vier
-Baendern an derselben senkrechten Position, und der Jetzt-Indikator ist **eine
-einzige** vertikale Linie durch alle Baender. Es wird keine High-Level-Chart-
-Bibliothek (Recharts/Chart.js/ECharts) und kein Canvas verwendet.
-
-### d3-scale / d3-shape
-
-- **d3-scale** (`lib/timeline/scales.ts`): `scaleTime` rechnet echte Zeit ↔ X-Pixel
-  (`timeToX`/`xToTime`), je ein `scaleLinear` pro Band rechnet Wert ↔ Y-Pixel und
-  – per `invert` – Pointer-Y ↔ echter Messwert.
-- **d3-shape** (`lib/timeline/spo2Path.ts`, `components/vitals/LineBand.tsx`):
-  SpO₂ nutzt `curveStepAfter` für Step-Linie und `area` für die wasserartige
-  Flaeche; Herzfrequenz/Temperatur nutzen `line`.
-
-React rendert alle SVG-Elemente; D3 manipuliert das DOM **nicht** direkt.
-
-### Pointer → Zeit und Wert
-
-`lib/timeline/pointerMapping.ts` wandelt eine Pointer-Position um:
-`getBoundingClientRect()` → SVG-Koordinaten → Band-Erkennung über Y →
-`scaleTime.invert` (Zeit) und `scaleLinear.invert` (Wert), gerundet gemaess
-Parameter-Precision. Zukunft und Bereich vor dem Start werden als **Fehler**
-gemeldet (keine stille Clamp). Nahe der Jetzt-Linie wird auf „jetzt“ geschnappt.
-
-Eine gemeinsame Pointer-Logik (`hooks/useTimelinePointer.ts`) behandelt Maus,
-Finger und Stift über `pointerdown/move/up/cancel` + `setPointerCapture`
-(`pointerType` wird ausgewertet). Kurze Bewegung = Tap; groessere Bewegung auf
-dem Plot = Seiten-Scroll (`touch-action: pan-y`), auf einem Punkt = Ziehen
-(`touch-action: none`). Waehrend des Ziehens gibt es nur eine Live-Preview;
-gespeichert wird **einmalig** beim Loslassen.
-
-### Start-/Jetzt-Logik und wachsende Zeitachse
-
-- Der Start-Button zeigt vor dem Start die laufende Uhr `HH:mm:ss`; beim Klick wird
-  `Date.now()` als Startzeit gespeichert und aendert sich danach nie mehr.
-- `domainStart` bleibt fix auf der Startzeit (immer links sichtbar), `domainEnd`
-  waechst mit `now + 30 min`, wodurch die 5-Minuten-Spalten mit der Zeit schmaler
-  werden. Es gibt **kein** horizontales Scrollen.
-- Die 5-Minuten-Ticks sind **relativ zur Startzeit** (Start 19:03 → 19:03, 19:08 …),
-  nicht an der Wanduhr ausgerichtet.
-- „Jetzt“ wird immer aus `Date.now()` berechnet (auch nach `visibilitychange`),
-  nie hochgezaehlt. Der Jetzt-Indikator aktualisiert isoliert (~250 ms), ohne die
-  ganze Seite mit 60 fps neu zu rendern.
-
-### SpO₂-Step-Area
-
-Der zuletzt gemessene SpO₂-Wert wird als Stufe **bis zur Jetzt-Linie** gehalten
-(nie in die Zukunft), ohne kuenstliche Schwankungen. Neue Werte erzeugen eine
-neue Stufe (`curveStepAfter`).
-
-### Erweiterte Timeline-Interaktion
-
-- `Eingriff beenden` ist vor dem Start deaktiviert und verlangt eine explizite
-  Bestätigung. `endedAt = Date.now()` wird sofort gespeichert. Danach frieren
-  phosphorgrüne Spur, Punkt, gemeinsame Jetzt-Linie und Zeit-Domain ein; der
-  Zustand `Beendet um HH:mm:ss` besitzt eine validierte Korrekturfunktion.
-- Kurze Fälle verwenden dünne 1-Minuten-Minor- und stärkere beschriftete
-  5-Minuten-Major-Linien. Bei langen Eingriffen werden Linien und Beschriftungen
-  anhand der verfügbaren Pixelbreite adaptiv ausgedünnt, damit Messwerte und
-  Texte lesbar bleiben.
-- Ein Crosshair zeigt Zeit, aktiven Parameter, Pointerwert und Einheit. Bei NiBP
-  ist dies nur der **Zeigerwert**; Systole und Diastole werden nie abgeleitet.
-  Crosshair-State ist transient und wird nicht in localStorage geschrieben.
-- Reines Nearest-Point-Hit-Testing nutzt Radien von **12 px (Maus)**,
-  **16 px (Pen)** und **18 px (Touch)**. NiBP prüft nur die vertikale
-  Systole-Diastole-Linie und den Mittelwertpunkt. Ausserhalb der Toleranz öffnet
-  ein neuer Eintrag; grosse 44×44-Overlay-Rechtecke gibt es nicht.
-- Pointer-Zeit und -Wert werden im neuen Vitalformular vorbelegt. Temperatur
-  nutzt einen such- und direkt auswählbaren 0,1-°C-Picker statt Spinbuttons; bei
-  NiBP wird nur `Mittel` vorbelegt. Jedes neue
-  und bestehende Formular besitzt ein editierbares `Zeit`-Feld (`HH:mm:ss`) mit
-  Start-, Zukunfts- und Ende-Validierung.
-- NiBP wird zweistufig erfasst: zuerst Zeit und `Mittel`, anschließend werden
-  die kleinen oberen/unteren SVG-Griffe für `Systolisch` und `Diastolisch`
-  direkt gezogen. Ein kurzer Klick/Tap auf einen weißen Griff öffnet zusätzlich
-  die direkte Zahleneingabe für Systolisch und Diastolisch. Während Hover, Pen-
-  oder Touch-Interaktion zeigt ein kompakter Tooltip alle drei Zahlen und genau
-  eine feste Einheit `mmHg`.
-
-### Medikamente, Infusionen und Ereignisse
-
-Oberhalb der Vitalbänder liegen drei Teile **desselben SVG und derselben X-Skala**:
-
-- **Medikamente**: Bolus oder kontinuierliche Gabe mit Name, Zeitpunkt,
-  Dosis/Rate, Einheit, optionaler Darstellungsdauer/Endzeit beziehungsweise
-  explizitem laufenden Status.
-- **Infusionen und Flüssigkeiten**: Name, Beginn, Menge/Dosis, Einheit,
-  optionale Dauer/Endzeit und laufender Status.
-- **Phasen und Ereignisse**: Beginn Anästhesie, Schnitt, Naht, Ende Ausleitung
-  und Patient aus dem Saal. Jeder Typ ist pro Fall einmalig; erneute Auswahl
-  öffnet die Bearbeitung.
-
-Medikament-/Infusionsmarker sind editier- und löschbar. Ein ausschließlich vom
-Benutzer angegebener Zeitraum wird ohne Flächenfärbung als diagonale
-**Hatch-Linien innerhalb jedes Vitalbands** gezeichnet. Farbe, Richtung,
-Strichstärke, Abstand und Strichstil unterscheiden parallele Einträge; Hover,
-Pen und Touch zeigen Name, Typ sowie Start-/Endzeit. Explizite Dauer/Endzeit
-wird vollständig angezeigt, laufende Gaben enden am aktuellen Zeitpunkt bzw.
-`endedAt`. Ohne Dauer/Endzeit entsteht nur ein Marker mit Startlinie. Es wird keine
-pharmakologische Wirkung, Verweildauer oder Behandlungsempfehlung abgeleitet.
-
-Allgemeine Hinzufügen-Buttons gibt es nicht mehr: Ein Klick in die
-Medikamenten- beziehungsweise Infusions-Lane übernimmt exakt die angezeigte
-Zeit in das Formular. Die fünf Ereigniswerkzeuge liegen im linken Gutter der
-Lane `Phasen und Ereignisse`; nach der Auswahl zeigt die Lane Symbol- und
-Sekundenzeit-Preview und platziert das Ereignis beim Klick. Im Edit-Drawer sind
-Ereignistyp/-name und Zeit änderbar. Eine erneute Berührung desselben Symbols
-hebt die Auswahl nicht auf; sie bleibt bis zur Platzierung stabil.
-
-Nach `Eingriff beenden` erscheint **Speichern und Schließen**. Die Aktion
-öffnet eine eigene Registerkarte, fragt nach Bestätigung und `Ordnerpfad`, legt
-ein vollständiges lokales Archiv an und leert erst danach aktive Fall- und
-Patientendaten. **Neuen Fall starten** führt zu leeren Basisdaten; nach
-`Okay und Weiter` steht wieder der reguläre Start-Button bereit.
-
-Eventmarker besitzen Symbol, Namen und Sekundenzeit. Sie lassen sich per Pointer
-Events mit `setPointerCapture` ausschließlich horizontal verschieben. Während
-des Drags erscheint eine Vorschau; persistiert wird einmal bei `pointerup`.
-Gleichzeitige Marker werden im Lane vertikal getrennt, ihre Zeitlinien behalten
-die exakte gemeinsame X-Position.
-
-### Farben (zentrale Tokens)
-
-Semantische Farben als CSS-Variablen in `app/globals.css`:
-`--vital-spo2` (blau), `--vital-heart-rate` (rot), `--vital-nibp` (grau),
-`--vital-temperature` (orange), `--timeline-now*` (grün). Farbe ist nie die
-einzige Information – jedes Band hat Name, Einheit, eigene Form und `aria-label`.
-
-### State & Persistenz (Zustand + localStorage)
-
-`store/anesthesiaCaseStore.ts` haelt Start-/Endzeit, Messungen, Medikamente,
-Infusionen, Ereignisse und Speicherstatus und
-persistiert **sofort** nach jeder abgeschlossenen Aktion unter dem versionierten
-Schlüssel `sikant-anesthesia-demo-case:v1` (`schemaVersion`). Gespeichert werden
-nur echte Zeit-, Mess-, Dosis-, Einheits- und Dauerwerte, **niemals Pixelkoordinaten** –
-bei Groessenaenderung werden alle Positionen neu berechnet (`ResizeObserver`).
-
-Die aktuelle Schema-Version ist **3**. Bestehende Version-1- und Version-2-Fälle
-werden beim Lesen verlustfrei migriert. Version 3 erlaubt bei einer neuen
-NiBP-Messung zunächst offene (`null`) Systole-/Diastole-Griffe; vorhandene
-vollständige Blutdruckwerte bleiben unverändert. Bei Version 1 bleiben
-`startedAt` und Vitalmessungen erhalten, `endedAt` wird `null` und
-Medikamente/Infusionen/Ereignisse werden leere Arrays.
-Beschädigte oder unbekannte Daten werden nicht still überschrieben.
-
-**Recovery nach Reload:** Start-/Endzeit, Messungen, Therapien, Ereignisse und
-SpO₂-Flaeche werden wiederhergestellt. Ohne `endedAt` springt der Jetzt-Indikator
-auf die echte aktuelle Zeit; mit `endedAt` bleibt er dort stehen.
-Beschaedigte Daten fuehren nicht zum Absturz: es erscheint
-„Gespeicherte Falldaten konnten nicht geladen werden.“ mit der Option
-**„Demofall zurücksetzen“** – beschaedigte Daten werden **nicht** still ueberschrieben.
-
-### iPad & Desktop / Apple Pencil
-
-Bedienbar mit Maus (Desktop), Finger und Apple Pencil (iPad). Ein echter Apple
-Pencil laesst sich nicht automatisiert testen; die Pointer-Events-Logik ist aber
-fuer `mouse`, `touch` und `pen` gemeinsam implementiert und wird per Playwright
-(Maus + iPad-Viewport) geprueft.
-
-Die Unit-Suite umfasst **103 Tests** unter anderem für Ende/Domain, Migration,
-Hit-Testing, Pointer-Mapping, Zeitvalidierung, Grid-Ticks, Therapiedauern und
-CRUD/Persistenz. Playwright umfasst **46 Läufe** (23 Szenarien mal
-Desktop-Chromium und iPad-naher Touch-Viewport), einschließlich Ende,
-präzisem Hit-Testing, Zeitbearbeitung, NIBP-Griffen, kontextuellen Lanes,
-Hatch-Tooltips, Therapie-CRUD, Event-Drag, Fallabschluss und der wieder
-großzügig lesbaren Timeline.
-
-## Wichtige Hinweise zur Speicherung
-
-- Die Speicherung gilt **nur** für **denselben Browser, dasselbe Gerät und
-  dieselbe Domain**. Es werden **keine** Daten an einen Server oder an andere
-  Geräte übertragen.
-- Der beim Abschluss eingegebene `Ordnerpfad` ist in der Browser-Demo eine
-  Ablagebezeichnung des lokalen Archivs; Webbrowser dürfen aus Sicherheitsgründen
-  nicht allein anhand eines Textpfads beliebige Betriebssystemordner beschreiben.
-- **Privates Surfen** (Inkognito) oder das **manuelle Löschen der Browserdaten**
-  hebt die Speicherung auf.
-- Es dürfen **ausschließlich fiktive Daten** verwendet werden.
-
-## Manuelle Prüfung auf iPad Safari
-
-Die Playwright-Tests laufen headless in Chromium. Die **endgültige manuelle
-Prüfung muss auf einem realen iPad mit Safari** erfolgen:
-
-1. Öffentliche URL (siehe unten) einmal **online** in Safari öffnen.
-2. Alle acht Felder mit **fiktiven** Daten ausfüllen; prüfen, dass pro Feld
-   `Wird gespeichert …` und nach ca. 2,5 s `✓ Gespeichert` erscheint.
-3. Prüfen, dass unten `✓ Alles dauerhaft automatisch gespeichert` erscheint.
-4. Safari-Tab schließen und erneut öffnen → Werte sind noch vorhanden.
-5. iPad in den **Flugmodus** schalten und die Seite neu laden → App öffnet sich,
-   Daten sind sichtbar; der Offline-Hinweis erscheint.
-6. Offline einen Wert ändern, neu laden → Änderung bleibt erhalten.
-7. Bedienbarkeit prüfen: alle Felder mit dem Finger bequem bedienbar, keine
-   Funktion nur per Hover erreichbar, kein ungewolltes horizontales Scrollen,
-   Bildschirmtastatur verdeckt keine wichtigen Bedienelemente.
-8. Optional: über „Zum Home-Bildschirm“ als App installieren.
-
-## Öffentliche Deployment-URL
-
-> _Wird nach dem Vercel-Deployment hier eingetragen._
->
-> Das Deployment auf Vercel benötigt eine einmalige Anmeldung (`vercel login`)
-> bzw. ein Vercel-Zugriffstoken. Siehe Abschnitt „Deployment“.
-
-## Deployment (Vercel)
-
-```bash
-npm i -g vercel      # oder: npx vercel
-vercel               # Vorschau-Deployment (fragt bei Bedarf nach Login)
-vercel --prod        # Produktions-Deployment
-```
-
-Nach erfolgreichem Deployment die ausgegebene HTTPS-URL oben unter
-„Öffentliche Deployment-URL“ eintragen.
+Die verifizierbaren Entwicklungs- und Korrekturschleifen sind in [docs/agentic-workflow.md](docs/agentic-workflow.md) dokumentiert. Agentische Unterstützung ersetzt dort ausdrücklich nicht die menschliche Produkt- und Sicherheitsprüfung.
 
 ## Bekannte Einschränkungen
 
-- Reiner **Client-Speicher**: Daten leben nur lokal im Browser; kein Backend,
-  keine Geräte-Synchronisation, kein Mehrbenutzerbetrieb.
-- Der Service Worker ist **nur im Produktions-Build** aktiv (im Dev-Modus
-  bewusst deaktiviert).
-- **WebKit auf diesem Windows-Host nicht startbar** („Host system is missing
-  dependencies“). Das iPad-Projekt läuft daher lokal auf der **Chromium-Engine**
-  mit iPad-Viewport + Touch. Auf macOS/Linux(-CI) kann stattdessen WebKit
-  verwendet werden (`npx playwright install webkit`, Projekt-`browserName` auf
-  `webkit` bzw. `devices["iPad (gen 7)"]`). Die endgültige Safari-Prüfung erfolgt
-  manuell auf einem realen iPad.
-- Ein echter **Apple Pencil** lässt sich nicht automatisiert testen; die
-  Pointer-Events-Logik ist für `mouse`/`touch`/`pen` gemeinsam implementiert.
-- Die Zeitfelder bearbeiten `HH:mm:ss` auf dem Kalendertag des Falls; ein über
-  Mitternacht laufender Mehrtageseingriff ist in dieser Demo nicht modelliert.
-- Medikament-/Infusionsnamen und Einheiten sind freie Benutzereingaben. Es gibt
-  bewusst keine Arzneimitteldatenbank, Plausibilitätsprüfung oder medizinische
-  Empfehlung.
-- Das Kalender-Popup der Datumsfelder kann sich am unteren Feldrand minimal
-  überlappen (funktional ohne Einschränkung).
+- Kein Backend, keine Geräte- oder Benutzersynchronisation und kein Mehrbenutzerbetrieb.
+- Die Offline-Funktion steht erst nach einem erfolgreichen Produktionsaufruf mit Service Worker zur Verfügung.
+- Playwrights iPad-Projekt nutzt Chromium und emuliert weder Mobile Safari noch einen echten Apple Pencil.
+- Die Dateifreigabe auf iPadOS hängt von Safari, iPadOS und der vom Benutzer gewählten Files-/Share-Aktion ab.
+- Physische iPad-, Apple-Pencil-, Screenreader- und vollständige manuelle Kontrastprüfung sind noch offen.
+- Zeitfelder beziehen sich auf den lokalen Kalendertag des Falls; ein mehrtägiger Eingriff über Mitternacht ist nicht als eigener Workflow modelliert.
+- Die Anwendung besitzt keine Arzneimitteldatenbank und führt keine medizinische Plausibilitätsprüfung durch.
 
-## Nächster geplanter Entwicklungsschritt
+## Deployment
 
-Naheliegend sind ein **PDF-Export**, optional strukturierte Kataloge ohne
-medizinische Vorschlagslogik und die reale Safari-/Apple-Pencil-Abnahme auf
-Hardware. Die gemeinsame Skala und die persistierten fachlichen Werte sind
-darauf vorbereitet.
+Eine öffentliche Bereitstellung wurde für diese Abgabe noch nicht eingerichtet. Die Anwendung kann mit den oben beschriebenen Befehlen lokal gestartet werden. Im Repository wurden weder eine Vercel-Projektverknüpfung noch eine Deployment-URL oder ein Deployment-Workflow gefunden; Vercel CLI war in der geprüften Umgebung nicht verfügbar. Ohne ausdrückliche Freigabe wird kein externes Projekt erstellt und kein Production-Deployment ausgelöst.
+
+Der überprüfbare Lieferstatus und die noch manuellen Schritte stehen in [docs/delivery-checklist.md](docs/delivery-checklist.md).

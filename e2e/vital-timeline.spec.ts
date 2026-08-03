@@ -4,39 +4,39 @@ import { test, expect, type Page } from "@playwright/test";
 
 // Tap nahe der Jetzt-Linie in einem Band (zum Anlegen eines Wertes ~ jetzt).
 async function tapBandNow(page: Page, kind: string) {
-  await page.locator(`[data-testid="band-${kind}"]`).scrollIntoViewIfNeeded();
-  const pt = await page.evaluate((k) => {
-    const bg = document.querySelector(`[data-testid="band-${k}"]`)!.getBoundingClientRect();
-    const svg = document.querySelector('[data-testid="vital-timeline-svg"]')!.getBoundingClientRect();
-    const nowDot = document.querySelector('[data-testid="now-dot"]')!;
-    const cx = parseFloat(nowDot.getAttribute("cx") || "0");
-    // Wenige Pixel rechts der Jetzt-Linie: sicher innerhalb der Plotflaeche und
-    // innerhalb der Jetzt-Snap-Toleranz (-> Zeit = jetzt, kein Zukunftsfehler).
-    return { x: svg.left + cx + 3, y: bg.top + bg.height / 2 };
-  }, kind);
-  await page.mouse.click(pt.x, pt.y);
+  const band = page.locator(`[data-testid="band-${kind}"]`);
+  const area = page.getByTestId("timeline-create-area");
+  await band.scrollIntoViewIfNeeded();
+  const [bandBox, areaBox, nowBox] = await Promise.all([band.boundingBox(), area.boundingBox(), page.getByTestId("now-dot").boundingBox()]);
+  expect(bandBox).not.toBeNull();
+  expect(areaBox).not.toBeNull();
+  expect(nowBox).not.toBeNull();
+  await area.click({ position: {
+    x: Math.min(areaBox!.width - 3, Math.max(3, nowBox!.x + nowBox!.width / 2 - areaBox!.x)),
+    y: bandBox!.y + bandBox!.height / 2 - areaBox!.y,
+  } });
 }
 
 // Tap an einem horizontalen Anteil der Plotbreite (fuer Fehlerfaelle: Zukunft / vor Start).
 async function tapBandFraction(page: Page, kind: string, fraction: number) {
-  await page.locator(`[data-testid="band-${kind}"]`).scrollIntoViewIfNeeded();
-  const pt = await page.evaluate(
-    ({ k, frac }) => {
-      const bg = document.querySelector(`[data-testid="band-${k}"]`)!.getBoundingClientRect();
-      return { x: bg.left + bg.width * frac, y: bg.top + bg.height / 2 };
-    },
-    { k: kind, frac: fraction },
-  );
-  await page.mouse.click(pt.x, pt.y);
+  const band = page.locator(`[data-testid="band-${kind}"]`);
+  const area = page.getByTestId("timeline-create-area");
+  await band.scrollIntoViewIfNeeded();
+  const [bandBox, areaBox] = await Promise.all([band.boundingBox(), area.boundingBox()]);
+  expect(bandBox).not.toBeNull();
+  expect(areaBox).not.toBeNull();
+  await area.click({ position: {
+    x: areaBox!.width * fraction,
+    y: bandBox!.y + bandBox!.height / 2 - areaBox!.y,
+  } });
 }
 
 async function tapLaneFraction(page: Page, kind: "event" | "medication" | "infusion", fraction: number) {
-  await page.getByTestId(`lane-create-${kind}`).scrollIntoViewIfNeeded();
-  const point = await page.evaluate(({ laneKind, fractionValue }) => {
-    const lane = document.querySelector(`[data-testid="lane-create-${laneKind}"]`)!.getBoundingClientRect();
-    return { x: lane.left + lane.width * fractionValue, y: lane.top + lane.height / 2 };
-  }, { laneKind: kind, fractionValue: fraction });
-  await page.mouse.click(point.x, point.y);
+  const lane = page.getByTestId(`lane-create-${kind}`);
+  await lane.scrollIntoViewIfNeeded();
+  const box = await lane.boundingBox();
+  expect(box).not.toBeNull();
+  await lane.click({ position: { x: box!.width * fraction, y: box!.height / 2 } });
 }
 
 // Tap auf ein konkretes Element (z.B. einen bestehenden Messpunkt).
@@ -54,7 +54,7 @@ async function startCase(page: Page) {
   await page.getByTestId("start-button").click();
   await expect(page.getByTestId("case-started")).toBeVisible();
   await expect(page.getByTestId("now-dot")).toBeVisible();
-  await page.waitForTimeout(350);
+  await expect(page.getByTestId("timeline-create-area")).toBeVisible();
 }
 
 async function addScalar(page: Page, kind: string, value: number) {
@@ -126,8 +126,12 @@ async function setTimePicker(page: Page, testId: string, value: string) {
 async function selectTherapyUnit(page: Page, testId: "medication-unit" | "infusion-unit", label: string) {
   const select = page.getByTestId(testId);
   await select.click();
-  await select.locator("input").fill(label);
-  await page.locator(`.ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-item-option[title="${label}"]`).click();
+  const input = select.locator("input");
+  await input.fill(label);
+  const option = page.locator(`.ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-item-option[title="${label}"]`);
+  await expect(option).toBeVisible();
+  await input.press("Enter");
+  await expect(select).toContainText(label);
 }
 
 test.beforeEach(async ({ page }) => {
@@ -308,6 +312,12 @@ test("Story 4: Eingriff beenden, Zeit einfrieren und Reload", async ({ page }) =
   await expect(page.getByTestId("case-ended")).toBeVisible();
   expect(await page.getByTestId("now-dot").getAttribute("cx")).toBe(frozenX);
   await tapBandFraction(page, "spo2", 0.5);
+  // Fuer diesen Abschluss-Test gilt deterministisch: Es liegen keine
+  // Basisdaten vor. Damit zeigt die Vollstaendigkeitspruefung den sachlichen
+  // Hinweis samt expliziter Kenntnisnahme in jedem Lauf.
+  await page.evaluate(() => {
+    localStorage.removeItem("sikant-anesthesia-demo.patient-base-data.v1");
+  });
   await expect(page.getByText("Nach dem Ende des Eingriffs können keine neuen Einträge dokumentiert werden.")).toBeVisible();
 
   // Abschluss öffnet eine neue Registerkarte, archiviert zuerst und setzt dann
@@ -333,10 +343,12 @@ test("Story 4: Eingriff beenden, Zeit einfrieren und Reload", async ({ page }) =
   const popupPromise = page.waitForEvent("popup");
   await page.getByTestId("save-close-case").click();
   const closePage = await popupPromise;
-  await closePage.waitForLoadState("domcontentloaded");
+  await closePage.waitForURL("**/abschluss");
   await expect(closePage.getByRole("heading", { name: "Kontrolle" })).toBeVisible();
   await expect(closePage.getByTestId("case-basis-summary")).toBeVisible();
   await expect(closePage.getByTestId("case-timeline-preview")).toBeVisible();
+  await expect(closePage.getByTestId("completeness-acknowledgement")).toBeVisible();
+  await closePage.getByTestId("completeness-acknowledgement").click();
   await closePage.getByTestId("choose-directory").click();
   await expect(closePage.getByTestId("selected-directory")).toContainText("Narkoseprotokolle");
   await closePage.getByTestId("archive-confirmation").click();
@@ -595,8 +607,18 @@ test("Ereignissymbol toggelt per Maus und iPad-Touch und bleibt nach Platzierung
 
   const lane = await page.getByTestId("lane-create-event").boundingBox();
   expect(lane).not.toBeNull();
-  if (touch) await page.touchscreen.tap(lane!.x + lane!.width * 0.2, lane!.y + lane!.height / 2);
-  else await page.mouse.click(lane!.x + lane!.width * 0.2, lane!.y + lane!.height / 2);
+  const laneX = lane!.x + lane!.width * 0.2;
+  const laneY = lane!.y + lane!.height / 2;
+  if (touch) {
+    // iPad-Zwei-Schritt: erster Tap legt nur einen Geist-Marker ab, kein Ereignis.
+    await page.touchscreen.tap(laneX, laneY);
+    await expect(page.getByTestId("timeline-preview")).toBeVisible();
+    await expect(page.getByTestId("event-incision")).toHaveCount(0);
+    // Zweiter Tap auf dieselbe Stelle platziert das Ereignis.
+    await page.touchscreen.tap(laneX, laneY);
+  } else {
+    await page.mouse.click(laneX, laneY);
+  }
   await expect(page.getByTestId("event-incision")).toBeVisible();
   await expect(tool).toHaveAttribute("aria-pressed", "true");
   await activate();
@@ -678,7 +700,11 @@ test("relative 5-Minuten-Warnung öffnet den exakten Bandwert und verschwindet e
   await page.getByTestId("entry-save").click();
   await expect(warning).toHaveCount(0);
 
-  await tapSelector(page, '[data-testid="points-temperature"] circle');
+  const temperaturePoint = page.locator('[data-testid^="point-temperature-"]');
+  await expect(temperaturePoint).toHaveCount(1);
+  await temperaturePoint.focus();
+  await temperaturePoint.press("Enter");
+  await expect(page.getByTestId("entry-delete")).toBeVisible();
   await page.getByTestId("entry-delete").click();
   await page.locator(".ant-popconfirm").getByRole("button", { name: "Löschen", exact: true }).click();
   await expect(page.getByTestId(`checkpoint-warning-${checkpoint}`)).toBeVisible();
@@ -706,12 +732,14 @@ test("Temperatur-Zwischenwerte bleiben vollständig; SpO₂ bleibt auf 0–100 b
   await page.reload();
   await expect(page.getByTestId("points-temperature").locator("circle")).toHaveCount(7);
 
-  await tapBandNow(page, "spo2");
+  // Zwischen den relativen 5- und 10-Minuten-Checkpoints dokumentieren. So
+  // prueft dieser Grenzwerttest die Werteeingabe und nicht den Warnungs-Button.
+  await tapBandFraction(page, "spo2", 0.1875);
   await page.getByTestId("entry-value").fill("100");
   await page.getByTestId("entry-save").click();
   await expect(page.getByTestId("entry-value")).toHaveCount(0);
 
-  await tapBandNow(page, "spo2");
+  await tapBandFraction(page, "spo2", 0.1875);
   await page.getByTestId("entry-value").fill("101");
   await page.getByTestId("entry-save").click();
   await expect(page.getByText("Der SpO₂-Wert muss zwischen 0 und 100 % liegen.")).toBeVisible();
@@ -722,9 +750,10 @@ test("Checkpoint-Y übernimmt Herzfrequenz und NIBP-Mittel aus der echten Klickh
   const startedAt = await seedStartedCase(page, 6);
   const checkpoint = startedAt + 5 * 60_000;
   const heartRateHit = page.getByTestId(`checkpoint-band-heartRate-${checkpoint}`);
+  await heartRateHit.scrollIntoViewIfNeeded();
   const heartRateBox = await heartRateHit.boundingBox();
   expect(heartRateBox).not.toBeNull();
-  await page.mouse.click(heartRateBox!.x + heartRateBox!.width / 2, heartRateBox!.y + heartRateBox!.height / 2);
+  await heartRateHit.click({ position: { x: heartRateBox!.width / 2, y: heartRateBox!.height / 2 } });
   await expect(page.getByTestId("entry-value")).toHaveValue("115");
   await expect(page.getByText("Herzfrequenz (/min)")).toBeVisible();
   await page.getByTestId("entry-cancel").click();
@@ -734,7 +763,7 @@ test("Checkpoint-Y übernimmt Herzfrequenz und NIBP-Mittel aus der echten Klickh
   await nibpHit.scrollIntoViewIfNeeded();
   const nibpBox = await nibpHit.boundingBox();
   expect(nibpBox).not.toBeNull();
-  await page.mouse.click(nibpBox!.x + nibpBox!.width / 2, nibpBox!.y + nibpBox!.height / 2);
+  await nibpHit.click({ position: { x: nibpBox!.width / 2, y: nibpBox!.height / 2 } });
   await expect(page.getByTestId("entry-mean")).toHaveValue("125");
 });
 
@@ -788,15 +817,29 @@ test("Therapieende über Mitternacht, Einheit und Ende-Handle bleiben nach Drag,
     await movedHit.click();
   }
   await expect(page.getByTestId("therapy-end-preview")).toBeVisible();
-  await page.getByTestId("band-temperature").scrollIntoViewIfNeeded();
-  const target = await page.evaluate(() => {
-    const band = document.querySelector('[data-testid="band-temperature"]')!.getBoundingClientRect();
-    const nowDot = document.querySelector('[data-testid="now-dot"]')!;
-    const svg = document.querySelector('[data-testid="vital-timeline-svg"]')!.getBoundingClientRect();
-    return { x: svg.left + Number(nowDot.getAttribute("cx")) - 10, y: band.top + band.height / 2 };
-  });
-  if (testInfo.project.name === "ipad-viewport") await page.touchscreen.tap(target.x, target.y);
-  else await page.mouse.click(target.x, target.y);
+  const temperatureBand = page.getByTestId("band-temperature");
+  const createArea = page.getByTestId("timeline-create-area");
+  await temperatureBand.scrollIntoViewIfNeeded();
+  const [temperatureBox, createAreaBox, nowDotBox] = await Promise.all([
+    temperatureBand.boundingBox(),
+    createArea.boundingBox(),
+    page.getByTestId("now-dot").boundingBox(),
+  ]);
+  expect(temperatureBox).not.toBeNull();
+  expect(createAreaBox).not.toBeNull();
+  expect(nowDotBox).not.toBeNull();
+  const placement = {
+    x: nowDotBox!.x + nowDotBox!.width / 2 - createAreaBox!.x - 10,
+    y: temperatureBox!.y + temperatureBox!.height / 2 - createAreaBox!.y,
+  };
+  if (testInfo.project.name === "ipad-viewport") {
+    const clientX = createAreaBox!.x + placement.x;
+    const clientY = createAreaBox!.y + placement.y;
+    await createArea.dispatchEvent("pointerdown", { pointerId: 51, pointerType: "touch", isPrimary: true, button: 0, buttons: 1, clientX, clientY });
+    await createArea.dispatchEvent("pointerup", { pointerId: 51, pointerType: "touch", isPrimary: true, button: 0, buttons: 0, clientX, clientY });
+  } else {
+    await createArea.click({ position: placement });
+  }
   const placed = await page.evaluate(() => JSON.parse(localStorage.getItem("sikant-anesthesia-demo-case:v1")!).medications[0]);
   expect(placed.endedAt).not.toBe(dragged.endedAt);
   await page.reload();
@@ -822,6 +865,7 @@ test("Kontrolle zeigt reale Daten und erstellt ohne Share API eine echte herunte
   await expect(page.getByTestId("case-basis-summary")).toContainText("Kontrollpatient");
   await expect(page.getByTestId("preview-series-temperature").locator("circle")).toHaveCount(1);
   await expect(page.getByTestId("file-delivery-fallback")).toBeVisible();
+  await page.getByTestId("completeness-acknowledgement").click();
   await page.getByTestId("archive-confirmation").click();
   const downloadPromise = page.waitForEvent("download");
   await page.getByTestId("archive-save").click();

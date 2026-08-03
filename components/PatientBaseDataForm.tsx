@@ -43,6 +43,7 @@ import { loadCase, saveCase } from "../lib/timeline/casePersistence";
 import { syncCriticalSettingsBirthDate } from "../lib/timeline/criticalSettingsStorage";
 import {
   basisDataChanged,
+  clearOpWorkflow,
   discardBasisEditSession,
   hasActiveDocumentation,
   loadOpWorkflow,
@@ -52,6 +53,8 @@ import {
 } from "../lib/opWorkflow";
 import { useCaseStore } from "../store/anesthesiaCaseStore";
 import { useNewOperationFlow } from "./useNewOperationFlow";
+import { clearCriticalSettings, createAutomaticCriticalSettings, saveCriticalSettings } from "../lib/timeline/criticalSettingsStorage";
+import { createFictionalDemoCase } from "../lib/timeline/fictionalDemoCase";
 
 function hasValue(value: unknown): boolean {
   return value !== null && value !== undefined && value !== "";
@@ -304,6 +307,37 @@ export function PatientBaseDataForm() {
 
   const hasDirtyBasisDraft = Boolean(editSession && basisDataChanged(editSession));
 
+  const loadFictionalDemo = useCallback(() => {
+    const applyDemo = () => {
+      const existing = loadCase();
+      if (existing.status === "ok") clearCriticalSettings(existing.data.caseId);
+      const demo = createFictionalDemoCase();
+      savePatientData(demo.patient);
+      saveCase(demo.caseData);
+      saveCriticalSettings(createAutomaticCriticalSettings(demo.caseData.caseId, demo.patient.birthDate));
+      clearOpWorkflow();
+      useCaseStore.setState({ ...demo.caseData, hydrated: true, loadError: false, saveStatus: "saved" });
+      router.push("/dokumentation");
+    };
+    const existingCase = loadCase();
+    const existingPatient = loadPatientData();
+    const patientHasContent = existingPatient
+      ? FIELD_ORDER.some((field) => hasValue(existingPatient[field]))
+      : false;
+    const caseHasContent = existingCase.status === "ok" && hasActiveDocumentation(existingCase.data);
+    if (!patientHasContent && !caseHasContent) {
+      applyDemo();
+      return;
+    }
+    Modal.confirm({
+      title: "Fiktiven Demofall laden?",
+      content: "Die aktuell lokal gespeicherten Angaben werden durch eindeutig fiktive Demodaten ersetzt. Dieser Schritt erfolgt nur nach Ihrer Bestätigung.",
+      okText: "Demo laden und Daten ersetzen",
+      cancelText: "Abbrechen",
+      onOk: applyDemo,
+    });
+  }, [router]);
+
   useEffect(() => {
     if (!hasDirtyBasisDraft) return;
     const beforeUnload = (event: BeforeUnloadEvent) => {
@@ -534,6 +568,9 @@ export function PatientBaseDataForm() {
           </Button>
           <Button size="large" block onClick={requestNewOperationSafely} data-testid="new-operation">
             Neue OP
+          </Button>
+          <Button size="large" block onClick={loadFictionalDemo} data-testid="load-fictional-demo">
+            Fiktiven Demofall laden
           </Button>
           <RemoveAllData onRemoved={handleRemoved} />
         </>

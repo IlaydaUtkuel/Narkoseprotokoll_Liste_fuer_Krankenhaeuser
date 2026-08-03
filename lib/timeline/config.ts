@@ -46,6 +46,34 @@ export const HIT_RADIUS_PX = {
   touch: 18,
 } as const;
 
+// Bewegungsschwelle, ab der ein Pointer-Kontakt nicht mehr als Tap gilt. Stift
+// ist praeziser als Finger, Maus am praezisesten. Wird fuer die zweistufige
+// iPad-Interaktion (Preview -> Bestaetigung) ausgewertet.
+export const POINTER_MOVE_THRESHOLD_PX = {
+  mouse: 3,
+  pen: 4,
+  touch: 8,
+} as const;
+
+// Zweite Beruehrung auf einer bereits abgelegten Vorschau: nur innerhalb dieser
+// Toleranz (in SVG-/CSS-Pixeln) gilt sie als Auswahl derselben Vorschau.
+export const SECOND_TAP_TOLERANCE_PX = {
+  mouse: 8,
+  pen: 14,
+  touch: 20,
+} as const;
+
+// Lebensdauer einer gelegten, nicht persistierten Vorschau (iPad-Zwei-Schritt).
+export const PREVIEW_TTL_MS = 3000;
+
+// Kleinster erzwungener Abstand zwischen Systolisch, Mittel und Diastolisch,
+// damit die Reihenfolge systolic > mean > diastolic beim Ziehen erhalten bleibt.
+export const MIN_NIBP_GAP = 1;
+
+// WCAG-nahe Mindestgroesse fuer primaere Touch-/Pen-Ziele. Sichtbare Symbole
+// duerfen kleiner bleiben; ihr interaktiver Container verwendet diesen Wert.
+export const MIN_INTERACTIVE_TARGET_PX = 46;
+
 // Layout-Konstanten des gemeinsamen SVG.
 export const LAYOUT = {
   marginLeft: 176,
@@ -56,7 +84,7 @@ export const LAYOUT = {
   bandTitleSpace: 12,
   bandPaddingBottom: 12,
   therapyLaneHeight: 96,
-  eventLaneHeight: 110,
+  eventLaneHeight: 145,
   therapyLaneGap: 6,
   therapyGapAfter: 14,
 };

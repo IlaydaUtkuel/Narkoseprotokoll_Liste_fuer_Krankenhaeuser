@@ -16,8 +16,12 @@ import { deriveCriticalWarnings } from "../../lib/timeline/criticalValues";
 import { loadCriticalSettings, type CriticalSettings } from "../../lib/timeline/criticalSettingsStorage";
 import { toggleEventSelection } from "../../lib/timeline/eventSelection";
 import { maxDocumentableTime, type TimelineTimeError } from "../../lib/timeline/timeValidation";
+import { isSecondTap, usesTwoPhase, type TimelinePreview } from "../../lib/timeline/previewInteraction";
+import { eventDefinition } from "../../lib/timeline/events";
 import { useCurrentTime } from "../../hooks/useCurrentTime";
 import { useElementSize } from "../../hooks/useElementSize";
+import { useTimelinePreview } from "../../hooks/useTimelinePreview";
+import { useBodyScrollLock } from "../../hooks/useBodyScrollLock";
 import { useCaseStore } from "../../store/anesthesiaCaseStore";
 import { TimeGrid } from "./TimeGrid";
 import { VitalBandBackground } from "./VitalBandBackground";
@@ -115,6 +119,12 @@ export function VitalTimeline({ patientBirthDate = "" }: { patientBirthDate?: st
   const [selectedCheckpoint, setSelectedCheckpoint] = useState<number | null>(null);
   const [therapyEndPlacement, setTherapyEndPlacement] = useState<TherapyEndPlacement | null>(null);
   const [criticalSettings, setCriticalSettings] = useState<CriticalSettings | null>(null);
+  // Genau eine fluechtige Vorschau (Stift/Finger, iPad-Zwei-Schritt). Nie persistiert.
+  const { preview, setPreview, clearPreview } = useTimelinePreview();
+  // Aktive Stift-/Finger-Interaktion auf der Grafik: sperrt vorübergehend den
+  // Seiten-Scroll (Maus bleibt unberührt, damit Desktop-Scrollen erhalten bleibt).
+  const [interactionActive, setInteractionActive] = useState(false);
+  useBodyScrollLock(interactionActive);
 
   useEffect(() => {
     // Separater, nicht-klinischer UI-Support-State; nie Teil des Fallexports.
@@ -127,16 +137,20 @@ export function VitalTimeline({ patientBirthDate = "" }: { patientBirthDate?: st
       if (event.key !== "Escape") return;
       setSelectedEventType(null);
       setLanePreview(null);
+      clearPreview();
       therapyEndPlacementRef.current = null;
       setTherapyEndPlacement(null);
     };
     window.addEventListener("keydown", clearEventSelection);
     return () => window.removeEventListener("keydown", clearEventSelection);
-  }, []);
+  }, [clearPreview]);
 
   const width = Math.max(MIN_WIDTH, Math.round(size.width) || MIN_WIDTH);
   const layout = useMemo(() => computeTimelineLayout(width), [width]);
-  const nowValue = now ?? 0;
+  // Direkt nach dem Start kann der Intervall-Tick von useCurrentTime noch wenige
+  // Millisekunden vor startedAt liegen. Die sichtbare Jetzt-Linie darf dadurch
+  // nicht in den gesperrten Bereich vor dem Fallstart geraten.
+  const nowValue = endedAt ?? Math.max(now ?? 0, startedAt ?? 0);
   const domain = computeDomain(startedAt, nowValue, undefined, endedAt);
   const scaleDomains = useMemo(
     () => computeVitalScaleDomains(measurements, domain.start, domain.end),
@@ -198,6 +212,7 @@ export function VitalTimeline({ patientBirthDate = "" }: { patientBirthDate?: st
   );
 
   const openEdit = (measurement: Measurement, nibpFocus?: "systolic" | "diastolic") => {
+    clearPreview();
     setSelectedId(measurement.id);
     setCrosshair(crosshairForMeasurement(measurement, xScale, yScales));
     if (measurement.kind === "nibp") {
@@ -260,6 +275,7 @@ export function VitalTimeline({ patientBirthDate = "" }: { patientBirthDate?: st
       setCrosshair({ ...mapped, locked: false });
       return;
     }
+    clearPreview();
     setSelectedId(null);
     setCrosshair({ ...mapped, locked: true });
     if (mapped.kind === "nibp") {
@@ -276,6 +292,7 @@ export function VitalTimeline({ patientBirthDate = "" }: { patientBirthDate?: st
       ? clampValue(clientY - rect.top, band.innerTop, band.innerBottom)
       : (band.innerTop + band.innerBottom) / 2;
     const pointerValue = normalizeVitalPointerValue(kind, yScales[kind].invert(svgY));
+    clearPreview();
     setSelectedCheckpoint(time);
     setCrosshair({
       ok: true,
@@ -377,21 +394,61 @@ export function VitalTimeline({ patientBirthDate = "" }: { patientBirthDate?: st
     pointerRef.current = { ...EMPTY_POINTER };
   };
 
+  // Legt eine fluechtige Vital-Vorschau ab (Stift/Finger, erster Kontakt). Kein
+  // Formular, keine Persistenz – nur ein gestrichelter Marker mit Koordinate.
+  const pinVitalPreview = (mapped: CursorMap, pointerType: string) => {
+    const config = VITAL_CONFIG[mapped.kind];
+    setPreview({
+      kind: "vital",
+      pointerType,
+      band: mapped.kind,
+      lane: null,
+      eventType: null,
+      time: mapped.time,
+      value: mapped.pointerValue,
+      unit: config.unit,
+      svgX: mapped.svgX,
+      svgY: mapped.svgY,
+    });
+  };
+
+  // Zweiter Kontakt auf einer abgelegten Vital-Vorschau: oeffnet das Formular mit
+  // der exakten Zeit und dem Wert der Vorschau (nicht der zweiten Klickposition).
+  const openCreateFromVitalPreview = () => {
+    if (!preview || preview.kind !== "vital" || !preview.band) return;
+    const band = preview.band;
+    const value = preview.value ?? 0;
+    openCreate({
+      ok: true,
+      kind: band,
+      time: preview.time,
+      value: band === "nibp" ? null : value,
+      pointerValue: value,
+      svgX: timeToX(xScale, preview.time),
+      svgY: yScales[band](value),
+    });
+  };
+
   const onPlotPointerDown = (event: ReactPointerEvent<SVGRectElement>) => {
     if (event.pointerType === "mouse" && event.button !== 0) return;
     if (startedAt === null) {
       message.info("Bitte starten Sie zuerst den Fall.");
       return;
     }
+    const twoPhase = usesTwoPhase(event.pointerType);
+    if (twoPhase) setInteractionActive(true);
     if (therapyEndPlacement) {
       const time = endTimeAtClientX(event.clientX);
       if (time !== null) previewTherapyEnd(time);
       pointerRef.current = { ...EMPTY_POINTER, active: true, pointerId: event.pointerId, pointerType: event.pointerType, startX: event.clientX, startY: event.clientY };
+      if (twoPhase) { try { event.currentTarget.setPointerCapture(event.pointerId); } catch { /* ignore */ } }
       return;
     }
     setSelectedCheckpoint(null);
     const mapped = mapPointer(event.clientX, event.clientY);
-    if ("svgX" in mapped) setCrosshair({ ...mapped, locked: true });
+    // Auf dem iPad folgt die Koordinate erst dem Kontakt (locked: false); die Maus
+    // behaelt ihre sofort fixierte Vorschau.
+    if ("svgX" in mapped) setCrosshair({ ...mapped, locked: !twoPhase });
     const rect = svgRef.current?.getBoundingClientRect();
     const hit = rect
       ? findNearestHit(
@@ -411,7 +468,9 @@ export function VitalTimeline({ patientBirthDate = "" }: { patientBirthDate?: st
       targetId: hit?.id ?? null,
     };
     const target = hit ? measurements.find((measurement) => measurement.id === hit.id) : null;
-    if (target && target.kind !== "nibp") {
+    // Skalar-Drag (alle Zeiger) oder eine Stift-/Finger-Vorschaugeste benoetigen
+    // Pointer-Capture, damit Move/Up zuverlaessig auf der Grafik ankommen.
+    if ((target && target.kind !== "nibp") || twoPhase) {
       try { event.currentTarget.setPointerCapture(event.pointerId); } catch { /* no capture */ }
     }
   };
@@ -424,7 +483,7 @@ export function VitalTimeline({ patientBirthDate = "" }: { patientBirthDate?: st
       return;
     }
     if (!state.active || state.pointerId !== event.pointerId) {
-      if ((event.pointerType === "mouse" || event.pointerType === "pen") && !draft && !therapyDraft) {
+      if ((event.pointerType === "mouse" || event.pointerType === "pen") && !draft && !therapyDraft && !preview) {
         const mapped = mapPointer(event.clientX, event.clientY);
         setCrosshair("svgX" in mapped ? { ...mapped, locked: false } : null);
         setIntervalTooltip(intervalAtPointer(event.clientX, event.clientY, false));
@@ -441,12 +500,18 @@ export function VitalTimeline({ patientBirthDate = "" }: { patientBirthDate?: st
     if (target && state.moved) {
       state.dragging = true;
       onScalarDragMove(target, event.clientX, event.clientY);
+      return;
+    }
+    // Stift/Finger auf freier Flaeche: die Koordinate folgt dem Kontakt live.
+    if (!state.targetId && usesTwoPhase(event.pointerType)) {
+      const mapped = mapPointer(event.clientX, event.clientY);
+      setCrosshair("svgX" in mapped ? { ...mapped, locked: false } : null);
     }
   };
 
   const onSvgPointerMove = (event: ReactPointerEvent<SVGSVGElement>) => {
     if (event.pointerType !== "mouse" && event.pointerType !== "pen") return;
-    if (pointerRef.current.active || draft || therapyDraft || therapyEndPlacementRef.current) return;
+    if (pointerRef.current.active || draft || therapyDraft || therapyEndPlacementRef.current || preview) return;
     const mapped = mapPointer(event.clientX, event.clientY);
     setCrosshair("svgX" in mapped ? { ...mapped, locked: false } : null);
     setIntervalTooltip(intervalAtPointer(event.clientX, event.clientY, false));
@@ -454,35 +519,82 @@ export function VitalTimeline({ patientBirthDate = "" }: { patientBirthDate?: st
 
   const onPlotPointerUp = (event: ReactPointerEvent<SVGRectElement>) => {
     const state = pointerRef.current;
-    if (!state.active || state.pointerId !== event.pointerId) return;
+    const twoPhase = usesTwoPhase(event.pointerType);
+    const finish = () => {
+      try { event.currentTarget.releasePointerCapture(event.pointerId); } catch { /* ignore */ }
+      resetPointer();
+      if (twoPhase) setInteractionActive(false);
+    };
+    if (!state.active || state.pointerId !== event.pointerId) {
+      if (twoPhase) setInteractionActive(false);
+      return;
+    }
     if (therapyEndPlacement) {
       const time = endTimeAtClientX(event.clientX);
       if (time !== null) commitTherapyEnd(time);
-      resetPointer();
+      finish();
       return;
     }
     const target = state.targetId ? measurements.find((measurement) => measurement.id === state.targetId) : null;
+    // Finger-Tap auf ein bestehendes Therapie-Intervall: Tooltip statt Vorschau.
     if (!state.moved && !target && event.pointerType === "touch") {
       const touchedInterval = intervalAtPointer(event.clientX, event.clientY, true);
       if (touchedInterval && !intervalTooltip?.locked) {
         setIntervalTooltip(touchedInterval);
-        try { event.currentTarget.releasePointerCapture(event.pointerId); } catch { /* ignore */ }
-        resetPointer();
+        finish();
         return;
       }
       if (!touchedInterval) setIntervalTooltip(null);
     }
-    if (state.dragging && target?.kind !== "nibp" && target) {
+    if (state.dragging && target && target.kind !== "nibp") {
       finishScalarDrag(target);
-    } else if (!state.moved) {
-      if (target) openEdit(target);
-      else {
-        const mapped = mapPointer(event.clientX, event.clientY);
-        if ("svgX" in mapped) openCreate(mapped);
-      }
+      finish();
+      return;
     }
-    try { event.currentTarget.releasePointerCapture(event.pointerId); } catch { /* ignore */ }
+    if (target && !state.moved) {
+      openEdit(target);
+      finish();
+      return;
+    }
+    if (!target) {
+      const mapped = mapPointer(event.clientX, event.clientY);
+      if (!("svgX" in mapped)) { finish(); return; }
+      if (!twoPhase) {
+        // Maus/Desktop: ein Tap ohne Bewegung legt sofort an (unveraendertes Verhalten).
+        if (!state.moved) openCreate(mapped);
+        finish();
+        return;
+      }
+      // Stift/Finger: erster Kontakt legt Vorschau ab, zweiter Kontakt bestaetigt.
+      if (!mapped.ok) {
+        showTimeError(mapped.reason);
+        clearPreview();
+        setCrosshair({ ...mapped, locked: false });
+        finish();
+        return;
+      }
+      const candidate = { kind: "vital" as const, band: mapped.kind, lane: null, svgX: mapped.svgX, svgY: mapped.svgY, pointerType: event.pointerType };
+      if (isSecondTap(preview, candidate, Date.now())) {
+        openCreateFromVitalPreview();
+      } else {
+        pinVitalPreview(mapped, event.pointerType);
+        setCrosshair(null);
+      }
+      finish();
+      return;
+    }
+    finish();
+  };
+
+  const onPlotPointerCancel = () => {
+    setDragPreview(null);
+    setIntervalTooltip(null);
+    if (therapyEndPlacement) {
+      therapyEndPlacementRef.current = null;
+      setTherapyEndPlacement(null);
+    }
     resetPointer();
+    setInteractionActive(false);
   };
 
   const closeVitalDraft = () => {
@@ -492,10 +604,63 @@ export function VitalTimeline({ patientBirthDate = "" }: { patientBirthDate?: st
     setIntervalTooltip(null);
   };
   const openTherapyDraft = (next: TherapyDraft) => {
+    clearPreview();
     setCrosshair(null);
     setIntervalTooltip(null);
     setLanePreview(null);
     setTherapyDraft(next);
+  };
+
+  // Platziert ein Ereignis. Pflichtereignisse (nicht "extra") duerfen nicht
+  // dupliziert werden – existiert bereits eines, wird stattdessen bearbeitet.
+  const placeEvent = (eventType: TimelineEventType, time: number) => {
+    if (eventType === "extra") {
+      openTherapyDraft({ mode: "create-event", eventType, time });
+      return;
+    }
+    const existing = events.find((item) => item.eventType === eventType);
+    if (existing) {
+      setLanePreview(null);
+      message.info("Dieses Ereignis existiert bereits und wird bearbeitet.");
+      openTherapyDraft({ mode: "edit-event", entry: existing });
+      return;
+    }
+    upsertEvent(eventType, time);
+    setLanePreview(null);
+    message.success("Ereignis platziert.");
+  };
+
+  // Stift/Finger auf den Lanes: erster Kontakt legt eine Vorschau ab, ein zweiter
+  // Kontakt auf dieselbe Lane bestaetigt und oeffnet das passende Formular.
+  const handleLaneTwoPhaseTap = (info: {
+    kind: "medication" | "infusion" | "event";
+    time: number;
+    svgX: number;
+    svgY: number;
+    pointerType: string;
+    eventType?: TimelineEventType;
+  }) => {
+    const candidate = { kind: info.kind, band: null, lane: info.kind, svgX: info.svgX, svgY: info.svgY, pointerType: info.pointerType };
+    if (isSecondTap(preview, candidate, Date.now()) && preview) {
+      const time = preview.time;
+      if (info.kind === "medication") openTherapyDraft({ mode: "create-medication", startedAt: time });
+      else if (info.kind === "infusion") openTherapyDraft({ mode: "create-infusion", startedAt: time });
+      else if (preview.eventType) placeEvent(preview.eventType, time);
+      clearPreview();
+      return;
+    }
+    setPreview({
+      kind: info.kind,
+      pointerType: info.pointerType,
+      band: null,
+      lane: info.kind,
+      eventType: info.eventType ?? null,
+      time: info.time,
+      value: null,
+      unit: null,
+      svgX: info.svgX,
+      svgY: info.svgY,
+    });
   };
 
   const ctx: BandContext = {
@@ -530,7 +695,7 @@ export function VitalTimeline({ patientBirthDate = "" }: { patientBirthDate?: st
             width={width}
             height={layout.height}
             viewBox={`0 0 ${width} ${layout.height}`}
-            role="img"
+            role="group"
             aria-label="Gemeinsame Zeitgrafik für Therapien, Ereignisse und Vitalparameter"
             data-testid="vital-timeline-svg"
             style={{ touchAction: "pan-y", display: "block" }}
@@ -560,15 +725,9 @@ export function VitalTimeline({ patientBirthDate = "" }: { patientBirthDate?: st
                 onPlaceTherapyEnd={(time) => commitTherapyEnd(time)}
                 onCreateMedication={(time) => openTherapyDraft({ mode: "create-medication", startedAt: time })}
                 onCreateInfusion={(time) => openTherapyDraft({ mode: "create-infusion", startedAt: time })}
-                onPlaceEvent={(eventType, time) => {
-                  if (eventType === "extra") {
-                    openTherapyDraft({ mode: "create-event", eventType, time });
-                    return;
-                  }
-                  upsertEvent(eventType, time);
-                  setLanePreview(null);
-                  message.success("Ereignis platziert.");
-                }}
+                onPlaceEvent={placeEvent}
+                onTwoPhaseTap={handleLaneTwoPhaseTap}
+                onInteractionActive={setInteractionActive}
                 onInvalid={showTimeError}
                 onMissingEvent={() => message.warning("Bitte zuerst links ein Ereignissymbol auswählen.")}
               />
@@ -599,7 +758,10 @@ export function VitalTimeline({ patientBirthDate = "" }: { patientBirthDate?: st
               height={layout.plotBottom - layout.plotTop}
               fill="transparent"
               data-testid="timeline-create-area"
-              style={{ touchAction: "pan-y", cursor: startedAt === null ? "not-allowed" : "crosshair" }}
+              // touch-action: none -> eine Stift-/Finger-Geste, die auf der Grafik
+              // beginnt, scrollt die Seite nicht. Gescrollt wird ueber die Ränder
+              // links (Gutter) und die Bereiche ausserhalb der Grafik.
+              style={{ touchAction: "none", cursor: startedAt === null ? "not-allowed" : "crosshair" }}
               onPointerDown={onPlotPointerDown}
               onPointerMove={onPlotPointerMove}
               onPointerUp={onPlotPointerUp}
@@ -608,15 +770,7 @@ export function VitalTimeline({ patientBirthDate = "" }: { patientBirthDate?: st
                 const time = endTimeAtClientX(event.clientX);
                 if (time !== null) commitTherapyEnd(time);
               }}
-              onPointerCancel={() => {
-                setDragPreview(null);
-                setIntervalTooltip(null);
-                if (therapyEndPlacement) {
-                  therapyEndPlacementRef.current = null;
-                  setTherapyEndPlacement(null);
-                }
-                resetPointer();
-              }}
+              onPointerCancel={onPlotPointerCancel}
               onPointerLeave={() => {
                 if (!crosshair?.locked && !draft) setCrosshair(null);
                 if (!intervalTooltip?.locked) setIntervalTooltip(null);
@@ -630,6 +784,7 @@ export function VitalTimeline({ patientBirthDate = "" }: { patientBirthDate?: st
                   layout={layout}
                   xScale={xScale}
                   selectedTime={selectedCheckpoint}
+                  interactionDisabled={therapyEndPlacement !== null}
                   onSelectTime={(time) => {
                     setSelectedCheckpoint(time);
                     setCrosshair(null);
@@ -680,6 +835,7 @@ export function VitalTimeline({ patientBirthDate = "" }: { patientBirthDate?: st
               <TherapyIntervalTooltip items={intervalTooltip.items} x={intervalTooltip.x} y={intervalTooltip.y} layout={layout} avoidRect={crosshairTooltipRect(crosshair, layout)} />
             ) : null}
             <CrosshairLayer crosshair={crosshair} layout={layout} />
+            <TimelinePreviewLayer preview={preview} layout={layout} xScale={xScale} yScales={yScales} />
             {renderDraftPreview(draft, xScale, yScales)}
           </svg>
         )}
@@ -748,6 +904,67 @@ function CrosshairLayer({ crosshair, layout }: { crosshair: CrosshairState | nul
         {formatClock(crosshair.time)} · {valueLabel}
       </text>
       {invalidLabel ? <text x={labelX + 8} y={labelY + 35} className="crosshair-tooltip-warning">{invalidLabel}</text> : null}
+    </g>
+  );
+}
+
+const PREVIEW_SHORT_LABEL: Record<VitalKind, string> = {
+  spo2: "SpO₂",
+  heartRate: "HF",
+  nibp: "NIBP",
+  temperature: "Temp",
+};
+
+// Zeichnet die eine aktive, fluechtige Vorschau. Bewusst gestrichelt und mit "+"
+// markiert, damit sie nie wie ein gespeicherter Messwert aussieht.
+function TimelinePreviewLayer({
+  preview,
+  layout,
+  xScale,
+  yScales,
+}: {
+  preview: TimelinePreview | null;
+  layout: BandContext["layout"];
+  xScale: BandContext["xScale"];
+  yScales: BandContext["yScales"];
+}) {
+  if (!preview) return null;
+  const x = timeToX(xScale, preview.time);
+  const nearRight = x > layout.plotRight - 210;
+  const tipX = nearRight ? x - 190 : x + 10;
+
+  if (preview.kind === "vital" && preview.band) {
+    const band = preview.band;
+    const value = preview.value ?? 0;
+    const y = yScales[band](value);
+    const label = `${formatClock(preview.time)} · ${PREVIEW_SHORT_LABEL[band]} ${formatVitalNumber(band, value)} ${VITAL_CONFIG[band].unit}`;
+    const tipY = clampValue(y - 34, layout.bandByKind[band].top + 4, layout.bandByKind[band].bottom - 26);
+    return (
+      <g pointerEvents="none" data-testid="timeline-preview" data-preview-kind="vital">
+        <line x1={x} y1={layout.contentTop} x2={x} y2={layout.plotBottom} className="timeline-preview-line" />
+        <circle cx={x} cy={y} r={7} className="timeline-preview-dot" />
+        <text x={x + 9} y={y - 7} className="timeline-preview-plus">+</text>
+        <rect x={tipX} y={tipY} width={182} height={20} rx={5} className="timeline-preview-tooltip" />
+        <text x={tipX + 7} y={tipY + 14} className="timeline-preview-tooltip-text" data-testid="preview-coordinate">{label}</text>
+      </g>
+    );
+  }
+
+  const lane = preview.lane === "medication"
+    ? layout.therapyLanes[0]
+    : preview.lane === "infusion"
+      ? layout.therapyLanes[1]
+      : layout.therapyLanes[2];
+  const isEvent = preview.kind === "event";
+  const definition = preview.eventType ? eventDefinition(preview.eventType) : null;
+  const tipY = lane.bottom - 24;
+  return (
+    <g pointerEvents="none" data-testid="timeline-preview" data-preview-kind={preview.kind}>
+      <line x1={x} y1={lane.top} x2={x} y2={layout.plotBottom} className={`timeline-preview-line ${isEvent ? "timeline-preview-line--event" : ""}`} />
+      {definition ? <text x={x} y={lane.top + 18} textAnchor="middle" className="timeline-preview-symbol">{definition.symbol}</text> : null}
+      <text x={x + 9} y={lane.top + 14} className={`timeline-preview-plus ${isEvent ? "timeline-preview-plus--event" : ""}`}>+</text>
+      <rect x={tipX} y={tipY} width={110} height={20} rx={5} className="timeline-preview-tooltip" />
+      <text x={tipX + 7} y={tipY + 14} className="timeline-preview-tooltip-text" data-testid="preview-coordinate">{formatClock(preview.time)}</text>
     </g>
   );
 }

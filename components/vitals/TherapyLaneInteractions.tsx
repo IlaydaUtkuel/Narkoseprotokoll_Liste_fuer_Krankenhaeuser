@@ -8,8 +8,18 @@ import { clampValue } from "../../lib/timeline/measurementUtils";
 import { timeToX, xToTime, type XScale } from "../../lib/timeline/scales";
 import { validateTimelineTime, type TimelineTimeError } from "../../lib/timeline/timeValidation";
 import { NOW_SNAP_PX } from "../../lib/timeline/config";
+import { usesTwoPhase } from "../../lib/timeline/previewInteraction";
 import { usePointerGesture } from "../../hooks/useTimelinePointer";
 import type { TimelineEventType } from "../../types/vitals";
+
+export interface LaneTwoPhaseTap {
+  kind: "medication" | "infusion" | "event";
+  time: number;
+  svgX: number;
+  svgY: number;
+  pointerType: string;
+  eventType?: TimelineEventType;
+}
 
 export type TherapyLaneKind = "medication" | "infusion" | "event";
 
@@ -37,6 +47,10 @@ interface Props {
   onMissingEvent: () => void;
   activeEndPlacement: boolean;
   onPlaceTherapyEnd: (time: number) => void;
+  // Stift/Finger: erster Kontakt legt Vorschau ab, zweiter Kontakt bestaetigt.
+  onTwoPhaseTap: (tap: LaneTwoPhaseTap) => void;
+  // Meldet aktive Stift-/Finger-Interaktion (fuer temporären Scroll-Lock).
+  onInteractionActive?: (active: boolean) => void;
 }
 
 export function TherapyLaneInteractionLayer(props: Props) {
@@ -72,8 +86,12 @@ function LaneTarget({
   onMissingEvent,
   activeEndPlacement,
   onPlaceTherapyEnd,
+  onTwoPhaseTap,
+  onInteractionActive,
 }: Props & { kind: TherapyLaneKind; lane: TimelineLayout["therapyLanes"][number] }) {
   const latest = useRef<LanePlacementPreview | null>(null);
+  const twoPhase = useRef({ active: false, pointerId: -1 });
+  const laneCenterY = lane.top + lane.height / 2;
   const mapEvent = (event: ReactPointerEvent<SVGRectElement>) => {
     const rect = event.currentTarget.ownerSVGElement?.getBoundingClientRect();
     if (!rect) return null;
@@ -91,6 +109,7 @@ function LaneTarget({
     latest.current = mapped;
     return mapped;
   };
+  // Maus/Tastatur: unveraendertes Sofort-Verhalten (ein Tap legt an).
   const place = (event: ReactPointerEvent<Element>) => {
     const mapped = mapEvent(event as ReactPointerEvent<SVGRectElement>);
     if (!mapped) return;
@@ -110,6 +129,23 @@ function LaneTarget({
     if (kind === "infusion") onCreateInfusion(mapped.time);
     if (kind === "event" && selectedEvent) onPlaceEvent(selectedEvent, mapped.time);
   };
+  // Stift/Finger: beim Loslassen Vorschau ablegen bzw. (zweiter Kontakt) bestaetigen.
+  const releaseTwoPhase = (event: ReactPointerEvent<SVGRectElement>) => {
+    const mapped = mapEvent(event);
+    if (!mapped) return;
+    onPreview(null);
+    if (mapped.error) { onInvalid(mapped.error); return; }
+    if (activeEndPlacement) { onPlaceTherapyEnd(mapped.time); return; }
+    if (kind === "event" && !selectedEvent) { onMissingEvent(); return; }
+    onTwoPhaseTap({
+      kind,
+      time: mapped.time,
+      svgX: mapped.x,
+      svgY: laneCenterY,
+      pointerType: event.pointerType,
+      ...(kind === "event" && selectedEvent ? { eventType: selectedEvent } : {}),
+    });
+  };
   const gesture = usePointerGesture({ capture: false, threshold: 9, onTap: place });
   return (
     <g>
@@ -124,10 +160,16 @@ function LaneTarget({
       role="button"
       tabIndex={0}
       className="therapy-lane-hit"
-      style={{ touchAction: "pan-y", cursor: activeEndPlacement ? "ew-resize" : kind === "event" && !selectedEvent ? "default" : "crosshair" }}
+      // touch-action: none -> die Interaktion in der Lane scrollt die Seite nicht.
+      style={{ touchAction: "none", cursor: activeEndPlacement ? "ew-resize" : kind === "event" && !selectedEvent ? "default" : "crosshair" }}
       onPointerMove={(event) => {
+        if (usesTwoPhase(event.pointerType)) {
+          const mapped = mapEvent(event);
+          if (mapped) onPreview(kind === "event" && !selectedEvent ? null : mapped);
+          return;
+        }
         gesture.onPointerMove(event);
-        if (event.pointerType === "mouse" || event.pointerType === "pen") {
+        if (event.pointerType === "mouse") {
           const mapped = mapEvent(event);
           if (mapped) onPreview(kind === "event" && !selectedEvent ? null : mapped);
         }
@@ -153,15 +195,38 @@ function LaneTarget({
         if (kind === "event" && !selectedEvent) onMissingEvent();
       }}
       onPointerDown={(event) => {
+        if (usesTwoPhase(event.pointerType)) {
+          twoPhase.current = { active: true, pointerId: event.pointerId };
+          try { event.currentTarget.setPointerCapture(event.pointerId); } catch { /* ignore */ }
+          onInteractionActive?.(true);
+          const mapped = mapEvent(event);
+          if (mapped) onPreview(kind === "event" && !selectedEvent ? null : mapped);
+          return;
+        }
         const mapped = mapEvent(event);
         if (mapped) onPreview(kind === "event" && !selectedEvent ? null : mapped);
         gesture.onPointerDown(event);
       }}
       onPointerUp={(event) => {
+        if (usesTwoPhase(event.pointerType)) {
+          const state = twoPhase.current;
+          twoPhase.current = { active: false, pointerId: -1 };
+          try { event.currentTarget.releasePointerCapture(event.pointerId); } catch { /* ignore */ }
+          onInteractionActive?.(false);
+          if (state.active && state.pointerId === event.pointerId) releaseTwoPhase(event);
+          return;
+        }
         gesture.onPointerUp(event);
         onPreview(null);
       }}
       onPointerCancel={(event) => {
+        if (usesTwoPhase(event.pointerType)) {
+          twoPhase.current = { active: false, pointerId: -1 };
+          try { event.currentTarget.releasePointerCapture(event.pointerId); } catch { /* ignore */ }
+          onInteractionActive?.(false);
+          onPreview(null);
+          return;
+        }
         gesture.onPointerCancel(event);
         onPreview(null);
       }}

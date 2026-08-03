@@ -17,8 +17,9 @@ export default defineConfig({
     baseURL: BASE_URL,
     trace: "on-first-retry",
     actionTimeout: 15_000,
-    // Auch fuer erfolgreiche Haupt-Flows Videos erzeugen (nicht nur bei Fehlern).
-    video: "on",
+    // Erfolgreiche Standardlaeufe erzeugen keine Artefaktflut; Videos werden nur
+    // bei Fehlern behalten.
+    video: "retain-on-failure",
   },
   projects: [
     {

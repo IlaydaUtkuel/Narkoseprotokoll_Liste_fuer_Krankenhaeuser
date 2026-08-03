@@ -223,6 +223,16 @@ body {
   border-radius: 8px;
 }
 
+.case-header__title--demo {
+  display: inline-flex;
+  padding: 5px 9px;
+  border: 2px solid #8b5e00;
+  border-radius: 7px;
+  background: #fff4d6;
+  color: #5c3600;
+  letter-spacing: 0.02em;
+}
+
 .case-header__back-button {
   padding: 0;
   border: 0;
@@ -285,7 +295,7 @@ body {
   flex-wrap: wrap;
   gap: 8px 12px;
   margin: 0 2px 8px;
-  color: #66756f;
+  color: #566660;
   font-size: 12px;
 }
 
@@ -332,16 +342,26 @@ body {
 .critical-warning-button {
   display: grid;
   place-items: center;
-  width: 22px;
-  height: 22px;
+  width: 44px;
+  height: 44px;
   padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+.critical-warning-icon {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
   border: 2px solid #fff;
   border-radius: 6px;
-  background: #b85f00;
+  background: #9a4c00;
   color: #fff;
-  font: 900 16px/18px "Segoe UI Symbol", system-ui, sans-serif;
-  cursor: pointer;
-  box-shadow: 0 0 0 2px #713900, 0 1px 3px rgba(23, 48, 41, 0.35);
+  font: 900 17px/20px "Segoe UI Symbol", system-ui, sans-serif;
+  box-shadow: 0 0 0 2px #5f3000, 0 1px 3px rgba(23, 48, 41, 0.35);
+  pointer-events: none;
 }
 
 .critical-warning-button:focus-visible {
@@ -464,16 +484,16 @@ body {
 }
 
 .event-tool {
-  width: 28px;
-  height: 28px;
+  width: 44px;
+  height: 44px;
   padding: 0;
   border: 1px solid #c9d7d2;
   border-radius: 7px;
   background: #ffffff;
   color: #694600;
-  font-size: 14px;
+  font-size: 17px;
   font-weight: 800;
-  line-height: 26px;
+  line-height: 42px;
   cursor: pointer;
 }
 
@@ -685,16 +705,29 @@ body {
 }
 
 .checkpoint-warning-button {
-  width: 22px;
-  height: 22px;
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
   padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+.checkpoint-warning-icon {
+  display: grid;
+  place-items: center;
+  box-sizing: border-box;
+  min-width: 10px;
+  min-height: 10px;
   border: 2px solid #fff;
   border-radius: 50%;
   background: #cf1322;
   color: #fff;
-  font: 800 13px/18px system-ui, sans-serif;
-  cursor: pointer;
+  font: 800 13px/1 system-ui, sans-serif;
   box-shadow: 0 0 0 1px #a8071a;
+  pointer-events: none;
 }
 
 .checkpoint-warning-button:focus-visible {
@@ -703,13 +736,7 @@ body {
 }
 
 .checkpoint-warning-button--dense {
-  min-width: 0;
-  padding: 0;
-  border: 0;
-  font-size: 0;
-  line-height: 0;
-  opacity: 0.7;
-  box-shadow: none;
+  opacity: 0.82;
 }
 
 .checkpoint-tooltip,
@@ -766,7 +793,7 @@ body {
 }
 
 .timeline-hint {
-  color: #6b7a76;
+  color: #566660;
   font-size: 13px;
   margin: 10px 4px 0;
 }
@@ -806,7 +833,19 @@ body {
 }
 
 .remove-all-button {
-  color: #8c8c8c;
+  color: #626f6b;
+}
+
+.ant-input::placeholder,
+.ant-input-number-input::placeholder,
+.ant-select-placeholder,
+textarea::placeholder {
+  color: #66736f !important;
+  opacity: 1;
+}
+
+.ant-typography-secondary {
+  color: #626f6b !important;
 }
 
 .remove-all-button:hover {
@@ -840,6 +879,61 @@ body {
 .close-case-loading {
   display: grid;
   place-items: center;
+}
+
+.completeness-panel {
+  display: grid;
+  gap: 12px;
+  margin: 12px 0 20px;
+  padding: 16px;
+  border: 1px solid #c9d7d2;
+  border-radius: 12px;
+  background: #fbfdfc;
+}
+
+.completeness-list {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.completeness-item {
+  display: grid;
+  grid-template-columns: 28px 1fr;
+  gap: 8px;
+  align-items: start;
+  padding: 10px;
+  border-radius: 8px;
+  color: #173029;
+  background: #f1f7f4;
+}
+
+.completeness-item--warning {
+  color: #5c3600;
+  background: #fff4d6;
+}
+
+.completeness-item--information {
+  color: #24465b;
+  background: #edf6fb;
+}
+
+.completeness-item__icon {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border: 2px solid currentColor;
+  border-radius: 50%;
+  font-weight: 800;
+}
+
+.completeness-item small {
+  display: block;
+  margin-top: 2px;
+  color: inherit;
 }
 
 .case-preview-timeline {
@@ -902,4 +996,77 @@ body {
 
 .close-case-error {
   margin-bottom: 16px;
+}
+
+/* ---- iPad/Safari: Eingabe-Drawer vollständig im sichtbaren Bereich ---- */
+/* dvh statt vh folgt der ein-/ausblendenden Safari-Adressleiste. max-height
+   begrenzt die von Ant Design gesetzte feste Höhe nur auf kurzen Viewports
+   (Landscape-iPad, eingeblendete Bildschirmtastatur); die feste Höhe bleibt der
+   Scroll-Kontext, damit der Drawer-Body zuverlässig scrollt und Speichern/
+   Abbrechen erreichbar bleiben. env(safe-area-inset-*) hält Aktionen über dem
+   Home-Indicator. */
+.vital-entry-drawer .ant-drawer-content-wrapper,
+.therapy-entry-drawer .ant-drawer-content-wrapper {
+  max-height: min(94dvh, 900px);
+}
+
+.vital-entry-drawer .ant-drawer-body,
+.therapy-entry-drawer .ant-drawer-body {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  padding-bottom: calc(16px + env(safe-area-inset-bottom));
+}
+
+.vital-entry-drawer .ant-drawer-header,
+.therapy-entry-drawer .ant-drawer-header {
+  padding-top: max(16px, env(safe-area-inset-top));
+}
+
+/* ---- Flüchtige Vorschau-Marker (iPad Zwei-Schritt-Interaktion) ---- */
+/* Bewusst gestrichelt und mit "+" markiert, damit sie nie wie ein echter,
+   gespeicherter Messwert aussehen. Sie werden nie persistiert oder exportiert. */
+.timeline-preview-line {
+  stroke: #1f7a63;
+  stroke-width: 1.25;
+  stroke-dasharray: 5 3;
+  opacity: 0.9;
+}
+
+.timeline-preview-line--event {
+  stroke: #8b5e00;
+}
+
+.timeline-preview-dot {
+  fill: none;
+  stroke: #1f7a63;
+  stroke-width: 2;
+  stroke-dasharray: 3 2.5;
+}
+
+.timeline-preview-symbol {
+  fill: #694600;
+  font-size: 15px;
+  font-weight: 800;
+  opacity: 0.75;
+}
+
+.timeline-preview-plus {
+  fill: #1f7a63;
+  font-size: 15px;
+  font-weight: 900;
+}
+
+.timeline-preview-plus--event {
+  fill: #8b5e00;
+}
+
+.timeline-preview-tooltip {
+  fill: rgba(23, 48, 41, 0.94);
+}
+
+.timeline-preview-tooltip-text {
+  fill: #fff;
+  font-size: 11px;
+  font-weight: 700;
 }

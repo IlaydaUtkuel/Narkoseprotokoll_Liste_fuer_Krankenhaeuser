@@ -2,7 +2,8 @@
 
 import { useState } from "react";
 import { formatClock } from "../../lib/timeline/format";
-import { checkpointTooltip, type VitalCheckpointWarning } from "../../lib/timeline/checkpoints";
+import { checkpointTooltip, nearestCheckpointTime, type VitalCheckpointWarning } from "../../lib/timeline/checkpoints";
+import { MIN_INTERACTIVE_TARGET_PX } from "../../lib/timeline/config";
 import { timeToX, type XScale } from "../../lib/timeline/scales";
 import type { TimelineLayout } from "../../lib/timeline/geometry";
 import type { VitalKind } from "../../types/vitals";
@@ -12,18 +13,23 @@ interface Props {
   layout: TimelineLayout;
   xScale: XScale;
   selectedTime: number | null;
+  interactionDisabled?: boolean;
   onSelectTime: (time: number) => void;
   onOpenBand: (kind: VitalKind, time: number, clientY?: number) => void;
 }
 
-export function CheckpointWarningLayer({ warnings, layout, xScale, selectedTime, onSelectTime, onOpenBand }: Props) {
+export function CheckpointWarningLayer({ warnings, layout, xScale, selectedTime, interactionDisabled = false, onSelectTime, onOpenBand }: Props) {
   const [tooltipTime, setTooltipTime] = useState<number | null>(null);
   const projected = warnings.map((warning) => timeToX(xScale, warning.time));
   const minimumGap = projected.length > 1
     ? Math.min(...projected.slice(1).map((x, index) => x - projected[index]))
     : Number.POSITIVE_INFINITY;
   const dense = minimumGap < 12;
-  const iconSize = dense ? Math.max(4, Math.min(7, minimumGap * 0.8)) : 22;
+  const iconSize = dense ? Math.max(10, Math.min(14, minimumGap * 0.9)) : 22;
+  const nearestTimeAtClientX = (clientX: number, svg: SVGSVGElement | null) => {
+    if (!svg) return null;
+    return nearestCheckpointTime(warnings, projected, clientX - svg.getBoundingClientRect().left);
+  };
   return (
     <g data-testid="checkpoint-warnings">
       {warnings.map((warning) => {
@@ -47,17 +53,22 @@ export function CheckpointWarningLayer({ warnings, layout, xScale, selectedTime,
             {layout.bands.map((band) => (
               <rect
                 key={band.kind}
-                x={x - 5}
+                x={x - MIN_INTERACTIVE_TARGET_PX / 2}
                 y={band.top}
-                width={10}
+                width={MIN_INTERACTIVE_TARGET_PX}
                 height={band.height}
                 fill="transparent"
+                pointerEvents={interactionDisabled ? "none" : undefined}
                 role="button"
-                tabIndex={0}
+                tabIndex={interactionDisabled ? -1 : 0}
                 aria-label={`${formatClock(warning.time)}: ${band.kind} nachtragen`}
                 data-testid={`checkpoint-band-${band.kind}-${warning.time}`}
                 className="checkpoint-band-hit"
-                onClick={(event) => { event.stopPropagation(); onOpenBand(band.kind, warning.time, event.clientY); }}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  const nearest = nearestTimeAtClientX(event.clientX, event.currentTarget.closest("svg") as SVGSVGElement | null);
+                  if (nearest !== null) onOpenBand(band.kind, nearest, event.clientY);
+                }}
                 onKeyDown={(event) => {
                   if (event.key === "Enter" || event.key === " ") {
                     event.preventDefault();
@@ -66,21 +77,44 @@ export function CheckpointWarningLayer({ warnings, layout, xScale, selectedTime,
                 }}
               />
             ))}
-            <foreignObject x={x - iconSize / 2} y={layout.plotBottom + (dense ? 34 : 27)} width={iconSize} height={iconSize}>
+            <foreignObject
+              x={x - MIN_INTERACTIVE_TARGET_PX / 2}
+              y={layout.plotBottom + 8}
+              width={MIN_INTERACTIVE_TARGET_PX}
+              height={MIN_INTERACTIVE_TARGET_PX}
+              pointerEvents={interactionDisabled ? "none" : undefined}
+            >
               <button
                 type="button"
+                disabled={interactionDisabled}
                 className={`checkpoint-warning-button ${dense ? "checkpoint-warning-button--dense" : ""}`}
                 aria-label={`${formatClock(warning.time)}. ${tooltip}`}
-                title={tooltip}
                 data-testid={`checkpoint-warning-${warning.time}`}
-                style={{ width: iconSize, height: iconSize }}
+                style={{ width: MIN_INTERACTIVE_TARGET_PX, height: MIN_INTERACTIVE_TARGET_PX }}
                 onMouseEnter={() => setTooltipTime(warning.time)}
                 onMouseLeave={() => setTooltipTime(null)}
                 onFocus={() => setTooltipTime(warning.time)}
                 onBlur={() => setTooltipTime(null)}
-                onPointerDown={() => setTooltipTime(warning.time)}
-                onClick={(event) => { event.stopPropagation(); onSelectTime(warning.time); }}
-              >!</button>
+                onPointerMove={(event) => {
+                  const nearest = nearestTimeAtClientX(event.clientX, event.currentTarget.closest("svg") as SVGSVGElement | null);
+                  if (nearest !== null) setTooltipTime(nearest);
+                }}
+                onPointerDown={(event) => {
+                  const nearest = nearestTimeAtClientX(event.clientX, event.currentTarget.closest("svg") as SVGSVGElement | null);
+                  setTooltipTime(nearest ?? warning.time);
+                }}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  const nearest = nearestTimeAtClientX(event.clientX, event.currentTarget.closest("svg") as SVGSVGElement | null);
+                  onSelectTime(nearest ?? warning.time);
+                }}
+              >
+                <span
+                  aria-hidden
+                  className="checkpoint-warning-icon"
+                  style={{ width: iconSize, height: iconSize, fontSize: dense ? 0 : 13 }}
+                >!</span>
+              </button>
             </foreignObject>
             {tooltipTime === warning.time ? (
               <g pointerEvents="none">

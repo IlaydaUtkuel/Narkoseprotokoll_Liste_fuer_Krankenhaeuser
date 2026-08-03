@@ -1,9 +1,14 @@
 "use client";
 
 import { useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
-import { VITAL_COLOR_VAR } from "../../lib/timeline/config";
+import { POINTER_MOVE_THRESHOLD_PX, VITAL_COLOR_VAR } from "../../lib/timeline/config";
 import { formatClock } from "../../lib/timeline/format";
-import { clampValue, roundToPrecision } from "../../lib/timeline/measurementUtils";
+import { clampValue } from "../../lib/timeline/measurementUtils";
+import {
+  applyNibpDrag,
+  nonOverlappingRadius,
+  type NibpTriple,
+} from "../../lib/timeline/nibpDrag";
 import { timeToX, xToTime } from "../../lib/timeline/scales";
 import { usePointerGesture } from "../../hooks/useTimelinePointer";
 import { MeasurementHit } from "./MeasurementHit";
@@ -117,6 +122,9 @@ function NibpHandles({
   const [meanPreview, setMeanPreview] = useState<{ mode: "time" | "mean"; time: number; mean: number } | null>(null);
   const meanPreviewRef = useRef<typeof meanPreview>(null);
   const meanDrag = useRef({ active: false, pointerId: -1, startX: 0, startY: 0, mode: null as "time" | "mean" | null });
+  // Snapshot aller drei Werte beim Drag-Start. Nicht gezogene Werte werden nie
+  // neu berechnet, sondern unveraendert aus diesem Snapshot uebernommen.
+  const dragSnapshot = useRef<NibpTriple | null>(null);
   const [active, setActive] = useState(false);
   const shownTime = meanPreview?.time ?? measurement.time;
   const shownMean = meanPreview?.mean ?? measurement.mean;
@@ -125,29 +133,42 @@ function NibpHandles({
   const shownSystolic = preview?.part === "systolic" ? preview.value : measurement.systolic;
   const shownDiastolic = preview?.part === "diastolic" ? preview.value : measurement.diastolic;
   const shownMeasurement = { ...measurement, time: shownTime, mean: shownMean, systolic: shownSystolic, diastolic: shownDiastolic };
+  const yMean = yScale(shownMean);
   const ySys = endpointY(shownMeasurement, "systolic", ctx);
   const yDia = endpointY(shownMeasurement, "diastolic", ctx);
+  // Trefferradien duerfen nie einen Nachbargriff verdecken: hoechstens der halbe
+  // Abstand zum naechsten Griff. So bleibt auf dem iPad der beabsichtigte Griff
+  // waehlbar, auch wenn die Werte dicht beieinander liegen.
+  const rSys = nonOverlappingRadius(ySys, [yMean], 9, 4);
+  const rDia = nonOverlappingRadius(yDia, [yMean], 9, 4);
+  const rMean = nonOverlappingRadius(yMean, [ySys, yDia], 10, 5);
   const tooltipX = cx > ctx.layout.plotRight - 252 ? cx - 246 : cx + 12;
   const tooltipY = clampValue(yScale(shownMean) - 48, ctx.layout.bandByKind.nibp.top + 3, ctx.layout.bandByKind.nibp.bottom - 45);
+
+  const snapshot = (): NibpTriple => ({ systolic: measurement.systolic, mean: measurement.mean, diastolic: measurement.diastolic });
 
   const updateMeanPreview = (event: ReactPointerEvent<SVGCircleElement>) => {
     const state = meanDrag.current;
     if (!state.active || state.pointerId !== event.pointerId) return;
     const dx = event.clientX - state.startX;
     const dy = event.clientY - state.startY;
-    if (!state.mode && Math.hypot(dx, dy) >= 6) state.mode = Math.abs(dx) >= Math.abs(dy) ? "time" : "mean";
+    if (!state.mode && Math.hypot(dx, dy) >= POINTER_MOVE_THRESHOLD_PX.touch) {
+      state.mode = Math.abs(dx) >= Math.abs(dy) ? "time" : "mean";
+    }
     if (!state.mode) return;
     const rect = event.currentTarget.ownerSVGElement?.getBoundingClientRect();
     if (!rect) return;
+    const base = dragSnapshot.current ?? snapshot();
     if (state.mode === "time") {
       const x = clampValue(event.clientX - rect.left, ctx.layout.plotLeft, ctx.layout.plotRight);
       const time = Math.round(clampValue(xToTime(ctx.xScale, x), ctx.startedAt, ctx.now));
-      const next = { mode: "time" as const, time, mean: measurement.mean };
+      const next = { mode: "time" as const, time, mean: base.mean };
       meanPreviewRef.current = next;
       setMeanPreview(next);
     } else {
       const [min, max] = yScale.domain();
-      const mean = roundToPrecision(clampValue(yScale.invert(event.clientY - rect.top), min, max), 0);
+      // Nur das Mittel folgt dem Pointer; Systolisch und Diastolisch begrenzen es.
+      const { mean } = applyNibpDrag(base, "mean", yScale.invert(event.clientY - rect.top), min, max);
       const next = { mode: "mean" as const, time: measurement.time, mean };
       meanPreviewRef.current = next;
       setMeanPreview(next);
@@ -160,37 +181,43 @@ function NibpHandles({
     if (!state.active || state.pointerId !== event.pointerId) return;
     try { event.currentTarget.releasePointerCapture(event.pointerId); } catch { /* ignore */ }
     const latestPreview = meanPreviewRef.current;
+    const base = dragSnapshot.current ?? snapshot();
     if (latestPreview) {
-      onUpdate(measurement.id, latestPreview.time, measurement.systolic, latestPreview.mean, measurement.diastolic);
+      // Nur Zeit bzw. Mittel aendern; Systolisch und Diastolisch aus dem Snapshot.
+      onUpdate(measurement.id, latestPreview.time, base.systolic, latestPreview.mean, base.diastolic);
     } else {
       ctx.onPointTap(measurement);
     }
     meanDrag.current = { active: false, pointerId: -1, startX: 0, startY: 0, mode: null };
     meanPreviewRef.current = null;
+    dragSnapshot.current = null;
     setMeanPreview(null);
   };
 
-  const valueFromPointer = (part: NibpPart, event: ReactPointerEvent<Element>) => {
+  const previewFromPointer = (part: NibpPart, event: ReactPointerEvent<Element>) => {
     const owner = event.currentTarget as SVGGraphicsElement;
     const rect = owner.ownerSVGElement?.getBoundingClientRect();
-    if (!rect) return measurement.mean;
-    const raw = yScale.invert(event.clientY - rect.top);
+    if (!rect) return;
+    const base = dragSnapshot.current ?? snapshot();
     const [scaleMin, scaleMax] = yScale.domain();
-    const min = part === "systolic" ? measurement.mean : scaleMin;
-    const max = part === "systolic" ? scaleMax : measurement.mean;
-    return roundToPrecision(clampValue(raw, min, max), 0);
+    const raw = yScale.invert(event.clientY - rect.top);
+    const next = applyNibpDrag(base, part, raw, scaleMin, scaleMax);
+    setActive(true);
+    setPreview({ part, value: (part === "systolic" ? next.systolic : next.diastolic) as number });
   };
 
   const commit = (part: NibpPart) => {
-    if (!preview || preview.part !== part) return;
+    if (!preview || preview.part !== part) { dragSnapshot.current = null; return; }
+    const base = dragSnapshot.current ?? snapshot();
     onUpdate(
       measurement.id,
       measurement.time,
-      part === "systolic" ? preview.value : measurement.systolic,
-      measurement.mean,
-      part === "diastolic" ? preview.value : measurement.diastolic,
+      part === "systolic" ? preview.value : base.systolic,
+      base.mean,
+      part === "diastolic" ? preview.value : base.diastolic,
     );
     setPreview(null);
+    dragSnapshot.current = null;
   };
 
   return (
@@ -199,26 +226,30 @@ function NibpHandles({
         part="systolic"
         cx={cx}
         cy={ySys}
+        radius={rSys}
         configured={shownSystolic !== null}
-        onPreview={(event) => { setActive(true); setPreview({ part: "systolic", value: valueFromPointer("systolic", event) }); }}
+        onDragStart={(event) => { dragSnapshot.current = snapshot(); previewFromPointer("systolic", event); }}
+        onPreview={(event) => previewFromPointer("systolic", event)}
         onCommit={() => commit("systolic")}
-        onCancel={() => setPreview(null)}
+        onCancel={() => { setPreview(null); dragSnapshot.current = null; }}
         onTap={() => onEdit(measurement, "systolic")}
       />
       <NibpHandle
         part="diastolic"
         cx={cx}
         cy={yDia}
+        radius={rDia}
         configured={shownDiastolic !== null}
-        onPreview={(event) => { setActive(true); setPreview({ part: "diastolic", value: valueFromPointer("diastolic", event) }); }}
+        onDragStart={(event) => { dragSnapshot.current = snapshot(); previewFromPointer("diastolic", event); }}
+        onPreview={(event) => previewFromPointer("diastolic", event)}
         onCommit={() => commit("diastolic")}
-        onCancel={() => setPreview(null)}
+        onCancel={() => { setPreview(null); dragSnapshot.current = null; }}
         onTap={() => onEdit(measurement, "diastolic")}
       />
       <circle
         cx={cx}
-        cy={yScale(shownMean)}
-        r={10}
+        cy={yMean}
+        r={rMean}
         fill="transparent"
         role="button"
         tabIndex={0}
@@ -228,6 +259,7 @@ function NibpHandles({
         onPointerDown={(event) => {
           if (event.pointerType === "mouse" && event.button !== 0) return;
           meanDrag.current = { active: true, pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, mode: null };
+          dragSnapshot.current = snapshot();
           try { event.currentTarget.setPointerCapture(event.pointerId); } catch { /* ignore */ }
           setActive(true);
         }}
@@ -237,6 +269,7 @@ function NibpHandles({
           if (meanDrag.current.pointerId !== event.pointerId) return;
           meanDrag.current = { active: false, pointerId: -1, startX: 0, startY: 0, mode: null };
           meanPreviewRef.current = null;
+          dragSnapshot.current = null;
           setMeanPreview(null);
           setActive(false);
         }}
@@ -276,7 +309,9 @@ function NibpHandle({
   part,
   cx,
   cy,
+  radius,
   configured,
+  onDragStart,
   onPreview,
   onCommit,
   onCancel,
@@ -285,7 +320,9 @@ function NibpHandle({
   part: NibpPart;
   cx: number;
   cy: number;
+  radius: number;
   configured: boolean;
+  onDragStart: (event: ReactPointerEvent<Element>) => void;
   onPreview: (event: ReactPointerEvent<Element>) => void;
   onCommit: () => void;
   onCancel: () => void;
@@ -293,9 +330,9 @@ function NibpHandle({
 }) {
   const gesture = usePointerGesture({
     capture: true,
-    threshold: 3,
+    threshold: POINTER_MOVE_THRESHOLD_PX.pen,
     onTap,
-    onDragStart: onPreview,
+    onDragStart,
     onDragMove: onPreview,
     onDragEnd: onCommit,
     onCancel,
@@ -306,7 +343,7 @@ function NibpHandle({
       <circle
         cx={cx}
         cy={cy}
-        r={9}
+        r={radius}
         fill="transparent"
         role="button"
         tabIndex={0}

@@ -21,6 +21,7 @@ import { CaseTimelinePreview } from "./CaseTimelinePreview";
 import { loadOpWorkflow, clearOpWorkflow } from "../../lib/opWorkflow";
 import { saveCase } from "../../lib/timeline/casePersistence";
 import { useCaseStore } from "../../store/anesthesiaCaseStore";
+import { evaluateCaseCompleteness } from "../../lib/timeline/caseCompleteness";
 
 const CONFIRMATION = "Ich habe die Falldaten und die Dokumentation geprüft und möchte den Fall speichern.";
 
@@ -31,6 +32,7 @@ export function CloseCasePage() {
   const [directoryCapable, setDirectoryCapable] = useState(false);
   const [directory, setDirectory] = useState<DirectoryHandleLike | null>(null);
   const [confirmed, setConfirmed] = useState(false);
+  const [completenessAcknowledged, setCompletenessAcknowledged] = useState(false);
   const [saving, setSaving] = useState(false);
   const [savedFile, setSavedFile] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -55,6 +57,11 @@ export function CloseCasePage() {
     const rest = seconds % 60;
     return `${hours} h ${minutes} min ${rest} s`;
   }, [snapshot]);
+
+  const completeness = useMemo(
+    () => snapshot ? evaluateCaseCompleteness(snapshot, snapshot.basisdaten, undefined, snapshot.endedAt ?? snapshot.startedAt ?? 0) : null,
+    [snapshot],
+  );
 
   if (savedFile) {
     return (
@@ -85,7 +92,7 @@ export function CloseCasePage() {
   };
 
   const save = async () => {
-    if (!confirmed || saving) return;
+    if (!confirmed || saving || (completeness?.issues.length && !completenessAcknowledged)) return;
     if (directoryCapable && !directory) {
       setError("Bitte zuerst einen Ordner auswählen.");
       return;
@@ -143,7 +150,48 @@ export function CloseCasePage() {
         <Typography.Paragraph type="secondary">Schreibgeschützte Vorschau der tatsächlich gespeicherten Falldaten.</Typography.Paragraph>
         <CaseTimelinePreview caseData={snapshot} />
 
-        <Typography.Title level={2}>3. Datei oder Ordner wählen</Typography.Title>
+        <Typography.Title level={2}>3. Vollständigkeitsprüfung</Typography.Title>
+        <section className="completeness-panel" data-testid="case-completeness" aria-live="polite">
+          {completeness?.hasWarnings ? (
+            <Alert
+              type="warning"
+              showIcon
+              message="Die Falldaten enthalten noch Dokumentationshinweise."
+              description="Die Hinweise beruhen ausschließlich auf vorhandenen Daten und bestehenden Formularregeln. Sie sind keine medizinische Bewertung."
+            />
+          ) : (
+            <Alert
+              type={completeness?.issues.length ? "info" : "success"}
+              showIcon
+              message={completeness?.issues.length ? "Bitte beachten Sie die sachlichen Hinweise." : "Keine offenen Dokumentationshinweise gefunden."}
+            />
+          )}
+          <ul className="completeness-list">
+            {completeness?.checks.map((check) => (
+              <li key={check.id} className={`completeness-item completeness-item--${check.status}`} data-testid={`completeness-${check.id}`}>
+                <span className="completeness-item__icon" aria-hidden>{check.status === "complete" ? "✓" : check.status === "warning" ? "!" : "i"}</span>
+                <span><strong>{check.title}</strong><small>{check.description}</small></span>
+              </li>
+            ))}
+          </ul>
+          {completeness?.issues.some((issue) => issue.target === "/") ? (
+            <Button onClick={() => router.push("/")} data-testid="completeness-back-basis">Zu den Basisdaten zurückkehren</Button>
+          ) : null}
+          {completeness?.issues.some((issue) => issue.target === "/dokumentation") ? (
+            <Button onClick={() => router.push("/dokumentation")} data-testid="completeness-back-documentation">Zur Dokumentation zurückkehren</Button>
+          ) : null}
+          {completeness?.issues.length ? (
+            <Checkbox
+              checked={completenessAcknowledged}
+              onChange={(event) => setCompletenessAcknowledged(event.target.checked)}
+              data-testid="completeness-acknowledgement"
+            >
+              Ich habe die Hinweise der Vollständigkeitsprüfung gesehen und möchte mit der Kontrolle fortfahren.
+            </Checkbox>
+          ) : null}
+        </section>
+
+        <Typography.Title level={2}>4. Datei oder Ordner wählen</Typography.Title>
         {directoryCapable ? (
           <div className="close-case-destination">
             <Button onClick={() => void selectDirectory()} data-testid="choose-directory">Ordner auswählen</Button>
@@ -153,13 +201,20 @@ export function CloseCasePage() {
           <Alert type="info" showIcon message="Die Falldatei wird über die Gerätefreigabe angeboten. Falls diese nicht verfügbar ist, wird eine echte JSON-Datei heruntergeladen, die in Dateien gespeichert werden kann." data-testid="file-delivery-fallback" />
         )}
 
-        <Typography.Title level={2}>4. Letzte Bestätigung</Typography.Title>
+        <Typography.Title level={2}>5. Letzte Bestätigung</Typography.Title>
         <Checkbox checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)} data-testid="archive-confirmation">
           {CONFIRMATION}
         </Checkbox>
         {error ? <Alert type="error" showIcon message={error} className="close-case-error" data-testid="archive-error" /> : null}
         <div className="close-case-actions">
-          <Button type="primary" size="large" disabled={!confirmed || (directoryCapable && !directory)} loading={saving} onClick={() => void save()} data-testid="archive-save">
+          <Button
+            type="primary"
+            size="large"
+            disabled={!confirmed || Boolean(completeness?.issues.length && !completenessAcknowledged) || (directoryCapable && !directory)}
+            loading={saving}
+            onClick={() => void save()}
+            data-testid="archive-save"
+          >
             Speichern und Schließen
           </Button>
         </div>

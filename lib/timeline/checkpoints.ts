@@ -63,3 +63,28 @@ export function checkpointTooltip(warning: VitalCheckpointWarning): string {
   const missing = warning.missing.map((item) => item.detail ? `${item.label} – ${item.detail}` : item.label).join(", ");
   return `${intro} Fehlend: ${missing}`;
 }
+
+/**
+ * Ordnet einen Pointer auch bei ueberlappenden 44-px-Hitflaechen eindeutig dem
+ * geometrisch naechsten Kontrollpunkt zu. Bei exakt gleichem Abstand gewinnt
+ * der fruehere Zeitpunkt, damit das Ergebnis von der DOM-Reihenfolge unabhaengig ist.
+ */
+export function nearestCheckpointTime(
+  warnings: VitalCheckpointWarning[],
+  projectedX: number[],
+  pointerX: number,
+  maxDistance = 22,
+): number | null {
+  let bestTime: number | null = null;
+  let bestDistance = Number.POSITIVE_INFINITY;
+  for (let index = 0; index < warnings.length; index += 1) {
+    const warning = warnings[index];
+    const distance = Math.abs((projectedX[index] ?? Number.POSITIVE_INFINITY) - pointerX);
+    if (distance > maxDistance) continue;
+    if (distance < bestDistance || (distance === bestDistance && (bestTime === null || warning.time < bestTime))) {
+      bestTime = warning.time;
+      bestDistance = distance;
+    }
+  }
+  return bestTime;
+}

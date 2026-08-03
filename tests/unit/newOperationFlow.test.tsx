@@ -39,11 +39,13 @@ function renderTrigger() {
   return render(<ConfigProvider><App><Trigger /></App></ConfigProvider>);
 }
 
-function activeDialog(): HTMLElement {
-  const dialogs = [...document.querySelectorAll<HTMLElement>(".ant-modal:not(.ant-zoom-leave)")];
-  const dialog = dialogs.at(-1);
-  if (!dialog) throw new Error("Aktiver Dialog fehlt");
-  return dialog;
+async function activeDialog(): Promise<HTMLElement> {
+  return waitFor(() => {
+    const dialogs = [...document.querySelectorAll<HTMLElement>(".ant-modal:not(.ant-zoom-leave)")];
+    const dialog = dialogs.at(-1);
+    if (!dialog) throw new Error("Aktiver Dialog fehlt");
+    return dialog;
+  });
 }
 
 describe("Neue-OP-Schutzfluss", () => {
@@ -60,8 +62,8 @@ describe("Neue-OP-Schutzfluss", () => {
     seed(2_000);
     renderTrigger();
     await userEvent.click(screen.getByRole("button", { name: "Neue OP" }));
-    expect(within(activeDialog()).getAllByText("Aktuellen OP-Fall zuerst speichern").length).toBeGreaterThan(0);
-    await userEvent.click(within(activeDialog()).getByRole("button", { name: "Abbrechen" }));
+    expect(within(await activeDialog()).getAllByText("Aktuellen OP-Fall zuerst speichern").length).toBeGreaterThan(0);
+    await userEvent.click(within(await activeDialog()).getByRole("button", { name: "Abbrechen" }));
     expect(loadCase()).toMatchObject({ status: "ok", data: { caseId: "new-op-case", measurements: [{ id: "v" }] } });
     expect(loadPatientData()?.patientName).toBe("Noch aktiv");
   });
@@ -70,7 +72,7 @@ describe("Neue-OP-Schutzfluss", () => {
     seed(null);
     renderTrigger();
     await userEvent.click(screen.getByRole("button", { name: "Neue OP" }));
-    await userEvent.click(within(activeDialog()).getByRole("button", { name: "Aktuellen Fall prüfen und speichern" }));
+    await userEvent.click(within(await activeDialog()).getByRole("button", { name: "Aktuellen Fall prüfen und speichern" }));
     await waitFor(() => expect([...document.querySelectorAll<HTMLElement>(".ant-modal:not(.ant-zoom-leave)")].some((item) => item.textContent?.includes("Eingriff beenden?"))).toBe(true));
     const endDialog = [...document.querySelectorAll<HTMLElement>(".ant-modal:not(.ant-zoom-leave)")].find((item) => item.textContent?.includes("Eingriff beenden?"))!;
     expect(within(endDialog).getAllByText("Eingriff beenden?").length).toBeGreaterThan(0);
@@ -84,7 +86,7 @@ describe("Neue-OP-Schutzfluss", () => {
     seed(2_000);
     renderTrigger();
     await userEvent.click(screen.getByRole("button", { name: "Neue OP" }));
-    await userEvent.click(within(activeDialog()).getByRole("button", { name: "Aktuellen Fall prüfen und speichern" }));
+    await userEvent.click(within(await activeDialog()).getByRole("button", { name: "Aktuellen Fall prüfen und speichern" }));
     expect(loadOpWorkflow().pendingAfterSaveAction).toBe("start-new-case");
     expect(push).toHaveBeenCalledWith("/abschluss");
     expect(loadCase().status).toBe("ok");
@@ -94,9 +96,9 @@ describe("Neue-OP-Schutzfluss", () => {
     seed(2_000, 4);
     renderTrigger();
     await userEvent.click(screen.getByRole("button", { name: "Neue OP" }));
-    expect(within(activeDialog()).getByText("Der aktuelle OP-Fall wurde bereits gespeichert. Möchten Sie jetzt eine neue OP beginnen?")).toBeInTheDocument();
+    expect(within(await activeDialog()).getByText("Der aktuelle OP-Fall wurde bereits gespeichert. Möchten Sie jetzt eine neue OP beginnen?")).toBeInTheDocument();
     expect(loadCase().status).toBe("ok");
-    await userEvent.click(within(activeDialog()).getByRole("button", { name: "Neue OP beginnen" }));
+    await userEvent.click(within(await activeDialog()).getByRole("button", { name: "Neue OP beginnen" }));
     expect(loadCase().status).toBe("empty");
     expect(loadPatientData()).toBeNull();
     expect(replace).toHaveBeenCalledWith("/");

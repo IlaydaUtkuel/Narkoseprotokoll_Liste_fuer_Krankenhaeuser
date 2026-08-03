@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { completedCheckpointTimes, deriveCheckpointWarnings } from "@/lib/timeline/checkpoints";
+import { completedCheckpointTimes, deriveCheckpointWarnings, nearestCheckpointTime } from "@/lib/timeline/checkpoints";
 import type { Measurement } from "@/types/vitals";
 
 const MIN = 60_000;
@@ -39,5 +39,12 @@ describe("relative 5-Minuten-Kontrollpunkte", () => {
     const values = completeAt(time).map((measurement) => measurement.kind === "nibp" ? { ...measurement, systolic: null, diastolic: null } : measurement) as Measurement[];
     const warning = deriveCheckpointWarnings(START, null, time, values)[0];
     expect(warning.missing[0]).toMatchObject({ kind: "nibp", detail: "Systolisch und Diastolisch" });
+  });
+
+  it("ordnet ueberlappende 44-px-Hitflaechen dem naechsten Kontrollpunkt deterministisch zu", () => {
+    const warnings = deriveCheckpointWarnings(START, START + 10 * MIN, START + 10 * MIN, []);
+    expect(nearestCheckpointTime(warnings, [100, 120], 116)).toBe(START + 10 * MIN);
+    expect(nearestCheckpointTime(warnings, [100, 120], 110)).toBe(START + 5 * MIN);
+    expect(nearestCheckpointTime(warnings, [100, 120], 145)).toBeNull();
   });
 });

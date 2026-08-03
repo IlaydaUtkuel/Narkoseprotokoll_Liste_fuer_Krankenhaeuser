@@ -12,6 +12,8 @@ import { createEmptyPatientData } from "../../lib/constants";
 import { loadCase } from "../../lib/timeline/casePersistence";
 import { hasActiveDocumentation, startBasisEditSession } from "../../lib/opWorkflow";
 import { useNewOperationFlow } from "../useNewOperationFlow";
+import { isFictionalDemoCase } from "../../lib/timeline/fictionalDemoCase";
+import { useCaseStore } from "../../store/anesthesiaCaseStore";
 
 interface Props {
   patient: PatientBaseData | null;
@@ -22,6 +24,8 @@ interface Props {
 export function CaseHeader({ patient }: Props) {
   const router = useRouter();
   const requestNewOperation = useNewOperationFlow();
+  const caseId = useCaseStore((state) => state.caseId);
+  const isDemo = isFictionalDemoCase(caseId);
   const [basisModalOpen, setBasisModalOpen] = useState(false);
   const procedure = patient?.procedure?.trim() || "—";
   const opDate = patient?.operationDate?.trim() || "—";
@@ -30,7 +34,9 @@ export function CaseHeader({ patient }: Props) {
   return (
     <div className="case-header" data-testid="case-header">
       <div className="case-header__info">
-        <div className="case-header__title">Fiktiver Demofall</div>
+        <div className={`case-header__title ${isDemo ? "case-header__title--demo" : ""}`} data-testid={isDemo ? "fictional-demo-banner" : undefined}>
+          {isDemo ? "FIKTIVER DEMOFALL – Keine realen Patientendaten" : "Fiktiver Demofall"}
+        </div>
         <div className="case-header__meta">
           <span>
             <strong>Eingriff:</strong> {procedure}
