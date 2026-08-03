@@ -49,6 +49,9 @@ interface Props {
   onPlaceTherapyEnd: (time: number) => void;
   // Stift/Finger: erster Kontakt legt Vorschau ab, zweiter Kontakt bestaetigt.
   onTwoPhaseTap: (tap: LaneTwoPhaseTap) => void;
+  // Beim pointerdown: erlaubt dem Elternteil, eine nicht bestätigte Vorschau sofort
+  // zu entfernen (verhindert zwei gleichzeitig sichtbare Vorschauen).
+  onTwoPhaseDown?: (info: { kind: "medication" | "infusion" | "event"; svgX: number; svgY: number; pointerType: string }) => void;
   // Meldet aktive Stift-/Finger-Interaktion (fuer temporären Scroll-Lock).
   onInteractionActive?: (active: boolean) => void;
 }
@@ -87,6 +90,7 @@ function LaneTarget({
   activeEndPlacement,
   onPlaceTherapyEnd,
   onTwoPhaseTap,
+  onTwoPhaseDown,
   onInteractionActive,
 }: Props & { kind: TherapyLaneKind; lane: TimelineLayout["therapyLanes"][number] }) {
   const latest = useRef<LanePlacementPreview | null>(null);
@@ -200,6 +204,8 @@ function LaneTarget({
           try { event.currentTarget.setPointerCapture(event.pointerId); } catch { /* ignore */ }
           onInteractionActive?.(true);
           const mapped = mapEvent(event);
+          // Elternteil entscheidet Bestätigung/sofortiges Löschen der alten Vorschau.
+          if (mapped) onTwoPhaseDown?.({ kind, svgX: mapped.x, svgY: laneCenterY, pointerType: event.pointerType });
           if (mapped) onPreview(kind === "event" && !selectedEvent ? null : mapped);
           return;
         }

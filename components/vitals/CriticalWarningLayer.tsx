@@ -4,7 +4,7 @@ import type { TimelineLayout } from "../../lib/timeline/geometry";
 import { timeToX, type XScale, type YScale } from "../../lib/timeline/scales";
 import type { CriticalWarning } from "../../lib/timeline/criticalValues";
 import type { Measurement, VitalKind } from "../../types/vitals";
-import { MIN_INTERACTIVE_TARGET_PX } from "../../lib/timeline/config";
+import { criticalIconRect } from "../../lib/timeline/warningIcons";
 
 export function CriticalWarningLayer({ warnings, measurements, layout, xScale, yScales }: {
   warnings: CriticalWarning[];
@@ -22,11 +22,10 @@ export function CriticalWarningLayer({ warnings, measurements, layout, xScale, y
         const markerX = timeToX(xScale, measurement.time);
         if (markerX < layout.plotLeft || markerX > layout.plotRight) return null;
         const markerY = yScales[measurement.kind](value);
-        const x = Math.min(layout.plotRight - MIN_INTERACTIVE_TARGET_PX, markerX + 7);
-        const y = Math.max(layout.bandByKind[measurement.kind].top + 2, markerY - 25);
+        const iconRect = criticalIconRect(markerX, markerY, layout.bandByKind[measurement.kind].top, layout.plotRight);
         return (
           <g key={warning.measurementId}>
-            <foreignObject x={x} y={y} width={MIN_INTERACTIVE_TARGET_PX} height={MIN_INTERACTIVE_TARGET_PX}>
+            <foreignObject x={iconRect.x} y={iconRect.y} width={iconRect.width} height={iconRect.height}>
               <button
                 type="button"
                 className="critical-warning-button"

@@ -39,6 +39,15 @@ Es dürfen ausschließlich klar fiktive Angaben verwendet werden.
 | Medikamenten-Vorschau (kesik Zeitlinie), Formular erst beim zweiten Kontakt | iPad Story 7 |
 | Infusions-Vorschau öffnet nur das Infusions-Formular | iPad Story 8 |
 | `pointercancel` verwirft Drag/Vorschau ohne Datenänderung | iPad Story 9 |
+| Medikament/Infusion-Vorschau als gestrichelter Kreis, kein „+“, versetzter Kontakt nutzt den fixierten Zeitstempel | iPad R2 Story 1/2 |
+| Neue Berührung entfernt die alte Vorschau sofort (nie zwei gleichzeitig) | iPad R2 Story 3 |
+| NIBP: Systolisch nahe ans Mittel gezogen lässt die anderen Werte unverändert | iPad R2 Story 6 |
+| Keine blaue Textauswahl auf der Grafik; Drawer-Eingaben bleiben auswählbar | iPad R2 Story 7 |
+| Checkpoint-Ausrufezeichen schaltet den Modus um (aria-pressed, schwarzer Rahmen) | iPad R2 Story 8 |
+| Checkpoint-Modus füllt vier Bänder per Stift an derselben Zeit, NIBP inline (kein Drawer) | iPad R2 Story 9 |
+| Checkpoint-Modus fixiert die Zeit unabhängig von der X-Position | iPad R2 Story 10 |
+| Koordinate + Medikament-Info + Warn-Ausrufezeichen gleichzeitig sichtbar, keine Überlappung (links/mitte/rechts) | iPad R2 Story 11 + placeTooltipAvoidingAll/warningIcons (Unit) |
+| Drawer öffnet oben (scrollTop = 0) – obere Formularfelder sichtbar | resetDrawerScrollTop (Unit) + iPad Story 5 |
 
 ## Prüfliste (physisches Gerät)
 
@@ -77,6 +86,17 @@ Reproduktionsschritte gehören in `Bemerkung`.
 | 27 | Langes Drücken erzeugt kein Kontextmenü / keine Textauswahl auf der Grafik | Nicht getestet |  |
 | 28 | Reload: echte Werte bleiben erhalten; keine Vorschau-Marker im Export | Nicht getestet |  |
 | 29 | Keine sichtbare UI-Fehlermeldung und kein Fehler im Safari Web Inspector | Nicht getestet |  |
+| 30 | Medikament/Infusion: gestrichelter Vorschaukreis, kein „+“; Kontakt irgendwo im Kreis wählt die Zeit | Nicht getestet |  |
+| 31 | Neue Berührung lässt die alte Vorschau sofort verschwinden (nie zwei gleichzeitig) | Nicht getestet |  |
+| 32 | Koordinate, aktives Medikament und Warnsymbol gleichzeitig sichtbar, ohne Überlappung | Nicht getestet |  |
+| 33 | Drawer öffnet oben – obere Formularfelder sofort sichtbar, nicht nur „Speichern“ | Nicht getestet |  |
+| 34 | NIBP: Systolisch/Diastolisch dicht ans Mittel ziehen – Mittel bleibt, kein Springen | Nicht getestet |  |
+| 35 | Beim Zeichnen auf 5-Minuten-Linien entsteht keine blaue Vollbild-Textauswahl | Nicht getestet |  |
+| 36 | Checkpoint-Ausrufezeichen tippen: schwarzer Rahmen, kein blaues Safari-Highlight | Nicht getestet |  |
+| 37 | Checkpoint-Modus: vier Bänder per Pencil an derselben Kontrollzeit füllen, kein Drawer | Nicht getestet |  |
+| 38 | Checkpoint-NIBP: Systolisch/Mittel/Diastolisch einzeln inline, keine automatische Schätzung | Nicht getestet |  |
+| 39 | Checkpoint-Modus: X-Position der Berührung ändert die gespeicherte Zeit nicht | Nicht getestet |  |
+| 40 | Checkpoint erneut tippen beendet den Modus; nach Vollständigkeit schließt er selbst | Nicht getestet |  |
 
 ## Abschluss
 

@@ -307,3 +307,258 @@ test("iPad Story 9: pointercancel verwirft Drag und Vorschau ohne Datenänderung
   const stored = await readCase(page);
   expect(stored.measurements).toHaveLength(1);
 });
+
+// ---- Runde 2: Vorschaukreis, Sofort-Löschen, NIBP-Präzision, Auswahl, Checkpoint ----
+
+// R2 Story 1: Medikament-Vorschaukreis, kein "+", versetzter zweiter Kontakt nutzt den fixierten Zeitstempel.
+test("iPad R2 Story 1: Medikament-Vorschaukreis ohne Plus; versetzter zweiter Kontakt nutzt den fixierten Zeitstempel", async ({ page }) => {
+  await seedStartedCase(page, 20);
+  const lane = page.getByTestId("lane-create-medication");
+  const box = await lane.boundingBox();
+  const x = box!.x + box!.width * 0.35;
+  const y = box!.y + box!.height / 2;
+  await tap(lane, x, y, "pen", 201);
+  await expect(page.getByTestId("timeline-preview")).toBeVisible();
+  await expect(page.getByTestId("preview-circle")).toBeVisible();
+  expect(await page.locator(".timeline-preview-plus").count()).toBe(0);
+  const pinnedTime = ((await page.getByTestId("preview-coordinate").textContent()) ?? "").trim();
+  // Zweiter Kontakt VERSETZT (innerhalb des 44-px-Kreises), nicht exakt auf der Linie.
+  await tap(lane, x + 15, y - 8, "pen", 202);
+  await expect(page.getByTestId("medication-name")).toBeVisible();
+  const formTime = await page.evaluate(() => {
+    const el = document.querySelector('[data-testid="therapy-time"]');
+    const input = el?.tagName === "INPUT" ? el : el?.querySelector("input");
+    return (input as HTMLInputElement | null)?.value ?? "";
+  });
+  expect(formTime).toBe(pinnedTime); // fixierter Zeitstempel der Vorschau, nicht die zweite Kontaktposition
+});
+
+// R2 Story 2: Infusion-Vorschaukreis öffnet nur das Infusions-Formular.
+test("iPad R2 Story 2: Infusion-Vorschaukreis, versetzter zweiter Kontakt öffnet nur das Infusions-Formular", async ({ page }) => {
+  await seedStartedCase(page, 20);
+  const lane = page.getByTestId("lane-create-infusion");
+  const box = await lane.boundingBox();
+  const x = box!.x + box!.width * 0.4;
+  const y = box!.y + box!.height / 2;
+  await tap(lane, x, y, "pen", 211);
+  await expect(page.getByTestId("preview-circle")).toBeVisible();
+  await tap(lane, x - 14, y + 6, "pen", 212);
+  await expect(page.getByTestId("infusion-name")).toBeVisible();
+  await expect(page.getByTestId("medication-name")).toHaveCount(0);
+});
+
+// R2 Story 3: eine neue Berührung entfernt die alte Vorschau sofort (nie zwei gleichzeitig).
+test("iPad R2 Story 3: neue Stift-Berührung entfernt die alte Vorschau sofort", async ({ page }) => {
+  await seedStartedCase(page, 20);
+  const lane = page.getByTestId("lane-create-medication");
+  const box = await lane.boundingBox();
+  const y = box!.y + box!.height / 2;
+  const x1 = box!.x + box!.width * 0.1;
+  const x2 = box!.x + box!.width * 0.32; // weit entfernt (> Trefferkreis), aber gültige Vergangenheit
+  await tap(lane, x1, y, "pen", 231);
+  await expect(page.getByTestId("timeline-preview")).toHaveCount(1);
+  // Neuer pointerdown weit entfernt: alte Vorschau sofort weg, neue noch nicht abgelegt.
+  await pointer(lane, "down", x2, y, "pen", 232);
+  await expect(page.getByTestId("timeline-preview")).toHaveCount(0);
+  await pointer(lane, "up", x2, y, "pen", 232);
+  await expect(page.getByTestId("timeline-preview")).toHaveCount(1);
+});
+
+// R2 Story 6: Systolisch nahe an das Mittel gezogen – Mittel und Diastolisch bleiben, Reihenfolge gewahrt.
+test("iPad R2 Story 6: Systolisch nahe Mittel gezogen lässt die anderen Werte unverändert", async ({ page }) => {
+  await seedStartedCase(page, 20, [
+    { id: "n6", kind: "nibp", time: Date.now() - 15 * 60_000, systolic: 120, mean: 90, diastolic: 60, createdAt: Date.now(), updatedAt: Date.now() },
+  ]);
+  const sys = page.getByTestId("nibp-handle-systolic").locator('circle[role="button"]');
+  const b = await sys.boundingBox();
+  const sx = b!.x + b!.width / 2;
+  const sy = b!.y + b!.height / 2;
+  await pointer(sys, "down", sx, sy, "pen", 261);
+  await pointer(sys, "move", sx, sy + 220, "pen", 261); // weit nach unten Richtung/über das Mittel
+  await pointer(sys, "up", sx, sy + 220, "pen", 261);
+  const n = (await readCase(page)).measurements[0];
+  expect(n.mean).toBe(90);
+  expect(n.diastolic).toBe(60);
+  expect(n.systolic).toBeGreaterThan(n.mean); // an der Grenze geclampt, kein Sprung über das Mittel
+});
+
+// R2 Story 7: keine blaue Textauswahl auf der Grafik; Drawer-Eingaben bleiben auswählbar.
+test("iPad R2 Story 7: keine Textauswahl auf der Grafik, aber Drawer-Eingabe bleibt auswählbar", async ({ page }) => {
+  await seedStartedCase(page, 20);
+  const svgUserSelect = await page.evaluate(() => {
+    const style = getComputedStyle(document.querySelector('[data-testid="vital-timeline-svg"]')!);
+    return style.userSelect || style.webkitUserSelect;
+  });
+  expect(svgUserSelect).toBe("none");
+
+  const area = page.getByTestId("timeline-create-area");
+  const band = await page.getByTestId("band-heartRate").boundingBox();
+  const abox = await area.boundingBox();
+  const gx = abox!.x + abox!.width * 0.3;
+  const gy = band!.y + band!.height / 2;
+  await pointer(area, "down", gx, gy, "pen", 271);
+  await pointer(area, "move", gx + 40, gy + 25, "pen", 271);
+  await pointer(area, "up", gx + 40, gy + 25, "pen", 271);
+  const selection = await page.evaluate(() => window.getSelection()?.toString() ?? "");
+  expect(selection).toBe("");
+
+  // Ein Drawer-Formular öffnen und prüfen, dass die Eingabe normal auswählbar bleibt.
+  const lane = page.getByTestId("lane-create-medication");
+  const lbox = await lane.boundingBox();
+  const lx = lbox!.x + lbox!.width * 0.3;
+  const ly = lbox!.y + lbox!.height / 2;
+  await tap(lane, lx, ly, "pen", 272);
+  await tap(lane, lx, ly, "pen", 273);
+  await expect(page.getByTestId("medication-name")).toBeVisible();
+  const inputUserSelect = await page.evaluate(() => {
+    const input = document.querySelector('[data-testid="medication-name"]') as HTMLElement;
+    return getComputedStyle(input).userSelect || getComputedStyle(input).webkitUserSelect;
+  });
+  expect(inputUserSelect).not.toBe("none");
+});
+
+// R2 Story 8: Checkpoint-Ausrufezeichen schaltet den Modus um (aria-pressed).
+test("iPad R2 Story 8: Checkpoint-Ausrufezeichen schaltet den Modus um", async ({ page }) => {
+  const startedAt = await seedStartedCase(page, 6);
+  const checkpoint = startedAt + 5 * 60_000;
+  const warn = page.getByTestId(`checkpoint-warning-${checkpoint}`);
+  await expect(warn).toBeVisible();
+  await expect(warn).toHaveAttribute("aria-pressed", "false");
+  await warn.click();
+  await expect(warn).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByTestId("checkpoint-selection")).toContainText(/Kontrollzeit/);
+  await warn.click();
+  await expect(warn).toHaveAttribute("aria-pressed", "false");
+});
+
+// R2 Story 9: Checkpoint-Modus füllt vier Bänder per Stift an derselben Kontrollzeit (kein Drawer).
+test("iPad R2 Story 9: Checkpoint-Modus füllt vier Bänder per Stift an derselben Zeit", async ({ page }) => {
+  const startedAt = await seedStartedCase(page, 6);
+  const checkpoint = startedAt + 5 * 60_000;
+  const warn = page.getByTestId(`checkpoint-warning-${checkpoint}`);
+  await warn.click();
+  await expect(warn).toHaveAttribute("aria-pressed", "true");
+  const area = page.getByTestId("timeline-create-area");
+  const penSet = async (kind: string, frac: number, id: number) => {
+    const band = page.getByTestId(`band-${kind}`);
+    await band.scrollIntoViewIfNeeded();
+    const [bb, ab] = await Promise.all([band.boundingBox(), area.boundingBox()]);
+    const x = ab!.x + ab!.width * 0.15;
+    const yy = bb!.y + bb!.height * frac;
+    await pointer(area, "down", x, yy, "pen", id);
+    await pointer(area, "move", x, yy, "pen", id);
+    await pointer(area, "up", x, yy, "pen", id);
+  };
+  await penSet("spo2", 0.4, 291);
+  await expect(page.getByTestId("entry-value")).toHaveCount(0); // kein Drawer
+  await expect(warn).toBeVisible();
+  await penSet("heartRate", 0.4, 292);
+  await penSet("temperature", 0.4, 293);
+  await expect(warn).toBeVisible();
+  await page.getByTestId("nibp-component-mean").click();
+  await penSet("nibp", 0.5, 294);
+  await page.getByTestId("nibp-component-systolic").click();
+  await penSet("nibp", 0.2, 295);
+  await page.getByTestId("nibp-component-diastolic").click();
+  await penSet("nibp", 0.8, 296);
+  await expect(warn).toHaveCount(0);
+  const times = (await readCase(page)).measurements.map((m: { time: number }) => m.time);
+  expect(new Set(times)).toEqual(new Set([checkpoint]));
+});
+
+// R2 Story 10: im Checkpoint-Modus bestimmt die X-Position der Berührung nicht die Zeit.
+test("iPad R2 Story 10: Checkpoint-Modus fixiert die Zeit unabhängig von der X-Position", async ({ page }) => {
+  const startedAt = await seedStartedCase(page, 6);
+  const checkpoint = startedAt + 5 * 60_000;
+  await page.getByTestId(`checkpoint-warning-${checkpoint}`).click();
+  const area = page.getByTestId("timeline-create-area");
+  const [bb, ab] = await Promise.all([page.getByTestId("band-spo2").boundingBox(), area.boundingBox()]);
+  const x = ab!.x + ab!.width * 0.7; // weit rechts vom Checkpoint
+  const y = bb!.y + bb!.height * 0.4;
+  await pointer(area, "down", x, y, "pen", 301);
+  await pointer(area, "up", x, y, "pen", 301);
+  const spo2 = (await readCase(page)).measurements.find((m: { kind: string }) => m.kind === "spo2");
+  expect(spo2.time).toBe(checkpoint);
+});
+
+// R2 Story 11: Koordinate, aktive Medikament-Info und Warn-Ausrufezeichen sind
+// gleichzeitig sichtbar und überlappen sich nicht (links/mitte/rechts).
+test("iPad R2 Story 11: Koordinate, Medikament-Info und Warnsymbol überlappen sich nie", async ({ page }) => {
+  await page.goto("/dokumentation");
+  await page.evaluate(() => localStorage.clear());
+  const startedAt = Date.now() - 20 * 60_000;
+  const caseId = "ipad-collide";
+  await page.evaluate(({ startedAt, caseId }) => {
+    const t = (min: number) => startedAt + min * 60_000;
+    localStorage.setItem("sikant-anesthesia-demo-case:v1", JSON.stringify({
+      schemaVersion: 6, caseId, caseRevision: 1, lastSuccessfullyExportedRevision: null,
+      startedAt, endedAt: null,
+      measurements: [
+        { id: "sp-l", kind: "spo2", time: t(1), value: 80, createdAt: startedAt, updatedAt: startedAt },
+        { id: "sp-m", kind: "spo2", time: t(10), value: 80, createdAt: startedAt, updatedAt: startedAt },
+        { id: "sp-r", kind: "spo2", time: t(19), value: 80, createdAt: startedAt, updatedAt: startedAt },
+      ],
+      medications: [
+        { id: "med1", kind: "medication", administrationType: "continuous", name: "Test-Perfusor", startedAt: t(0.5), dose: 5, unit: { label: "mg", code: "mg", system: "UCUM", isCustom: false }, concentration: null, endedAt: null, ongoing: true, createdAt: startedAt, updatedAt: startedAt },
+      ],
+      infusions: [], events: [], lastSavedAt: startedAt,
+    }));
+    localStorage.setItem("sikant-critical-values:v1:" + caseId, JSON.stringify({
+      schemaVersion: 1, caseId, birthDate: "", ageGroup: "adult", source: "custom", ageChangedNotice: false,
+      thresholds: { spo2Lower: 90, mapLower: 65, systolicLower: 90, systolicUpper: 180, diastolicUpper: 120, heartRateLower: 50, heartRateUpper: 150, temperatureLower: 36, temperatureUpper: 38.5, temperatureRiseDelta: 0.5, temperatureRiseWindowMinutes: 15 },
+    }));
+  }, { startedAt, caseId });
+  await page.reload();
+  await expect(page.getByTestId("case-started")).toBeVisible();
+  const warnSelector = '[data-testid^="critical-warning-"]:not([data-testid="critical-warning-layer"])';
+  await expect(page.locator(warnSelector)).toHaveCount(3);
+  const area = page.getByTestId("timeline-create-area");
+  await page.getByTestId("band-spo2").scrollIntoViewIfNeeded();
+
+  const hoverBoxes = async (pointIndex: number) => {
+    const pt = await page.evaluate((i) => {
+      const circles = [...document.querySelectorAll('[data-testid^="point-spo2-"]')]
+        .map((c) => c.getBoundingClientRect())
+        .sort((a, b) => a.left - b.left);
+      const r = circles[i];
+      return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+    }, pointIndex);
+    await pointer(area, "move", pt.x, pt.y, "pen", 411);
+    await expect(page.getByTestId("timeline-crosshair")).toBeVisible();
+    await expect(page.getByTestId("therapy-interval-tooltip")).toBeVisible();
+    return page.evaluate((sel) => {
+      const plain = (el: Element | null) => {
+        if (!el) return null;
+        const r = el.getBoundingClientRect();
+        return { left: r.left, top: r.top, right: r.right, bottom: r.bottom };
+      };
+      return {
+        coord: plain(document.querySelector('[data-testid="timeline-crosshair"] .crosshair-tooltip')),
+        med: plain(document.querySelector('[data-testid="therapy-interval-tooltip"] rect')),
+        warns: [...document.querySelectorAll(sel)].map(plain),
+        vw: window.innerWidth,
+      };
+    }, warnSelector);
+  };
+
+  type Box = { left: number; top: number; right: number; bottom: number };
+  const intersect = (a: Box, b: Box) => !(a.right <= b.left || b.right <= a.left || a.bottom <= b.top || b.bottom <= a.top);
+
+  for (const index of [1, 2, 0]) { // Mitte, rechte Kante, linke Kante
+    const boxes = await hoverBoxes(index);
+    expect(boxes.coord).not.toBeNull();
+    expect(boxes.med).not.toBeNull();
+    const coord = boxes.coord as Box;
+    const med = boxes.med as Box;
+    for (const w of boxes.warns as Box[]) {
+      expect(intersect(coord, w)).toBe(false);
+      expect(intersect(med, w)).toBe(false);
+    }
+    expect(intersect(coord, med)).toBe(false);
+    // Kein horizontaler Viewport-Overflow an den Kanten.
+    expect(coord.left).toBeGreaterThanOrEqual(0);
+    expect(coord.right).toBeLessThanOrEqual(boxes.vw);
+    expect(med.left).toBeGreaterThanOrEqual(0);
+    expect(med.right).toBeLessThanOrEqual(boxes.vw);
+  }
+});

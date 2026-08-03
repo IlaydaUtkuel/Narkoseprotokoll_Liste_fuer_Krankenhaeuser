@@ -110,5 +110,16 @@ export function usePointerGesture(handlers: GestureHandlers) {
     reset();
   };
 
-  return { onPointerDown, onPointerMove, onPointerUp, onPointerCancel };
+  // Safari kann die Pointer-Capture mitten im Drag verlieren (z. B. System-Geste).
+  // Dann kommt kein pointerup mehr. Ein laufender Drag wird sicher abgeschlossen,
+  // ein noch nicht als Drag erkannter Kontakt sicher verworfen – nie hängen bleiben.
+  const onLostPointerCapture = (e: ReactPointerEvent<Element>) => {
+    const s = state.current;
+    if (!s.active || e.pointerId !== s.pointerId) return;
+    if (s.dragging) handlers.onDragEnd?.(e);
+    else handlers.onCancel?.();
+    reset();
+  };
+
+  return { onPointerDown, onPointerMove, onPointerUp, onPointerCancel, onLostPointerCapture };
 }

@@ -4,7 +4,7 @@ import { useId, useRef, useState } from "react";
 import { eventDefinition } from "../../lib/timeline/events";
 import { formatClock } from "../../lib/timeline/format";
 import { durationMinutesBetween, formatLocalDateTime } from "../../lib/timeline/therapyTime";
-import { placeTooltipAvoiding, type TooltipRect } from "../../lib/timeline/tooltipPlacement";
+import { placeTooltipAvoidingAll, type TooltipRect } from "../../lib/timeline/tooltipPlacement";
 import { clampValue } from "../../lib/timeline/measurementUtils";
 import { timeToX, xToTime, type XScale } from "../../lib/timeline/scales";
 import { displayEndTime } from "../../lib/timeline/therapyUtils";
@@ -66,22 +66,23 @@ export function TherapyIntervalTooltip({
   x,
   y,
   layout,
-  avoidRect,
+  avoidRects = [],
 }: {
   items: ActiveTherapyInterval[];
   x: number;
   y: number;
   layout: TimelineLayout;
-  avoidRect?: TooltipRect | null;
+  // Zu meidende Boxen: Koordinaten-Tooltip UND Warn-Ausrufezeichen.
+  avoidRects?: TooltipRect[];
 }) {
   if (items.length === 0) return null;
   const width = 308;
   const height = 12 + items.length * 102;
-  const placed = placeTooltipAvoiding(
+  const placed = placeTooltipAvoidingAll(
     { x, y },
     { width, height },
     { left: layout.plotLeft + 3, top: layout.plotTop + 3, right: layout.plotRight - 3, bottom: layout.plotBottom - 3 },
-    avoidRect,
+    avoidRects,
   );
   return (
     <g pointerEvents="none" data-testid="therapy-interval-tooltip">

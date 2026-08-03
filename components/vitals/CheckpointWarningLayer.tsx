@@ -4,6 +4,7 @@ import { useState } from "react";
 import { formatClock } from "../../lib/timeline/format";
 import { checkpointTooltip, nearestCheckpointTime, type VitalCheckpointWarning } from "../../lib/timeline/checkpoints";
 import { MIN_INTERACTIVE_TARGET_PX } from "../../lib/timeline/config";
+import { checkpointIconRect } from "../../lib/timeline/warningIcons";
 import { timeToX, type XScale } from "../../lib/timeline/scales";
 import type { TimelineLayout } from "../../lib/timeline/geometry";
 import type { VitalKind } from "../../types/vitals";
@@ -14,11 +15,14 @@ interface Props {
   xScale: XScale;
   selectedTime: number | null;
   interactionDisabled?: boolean;
-  onSelectTime: (time: number) => void;
+  // Zeit des aktiven Checkpoint-Modus (null = normaler Modus).
+  checkpointModeTime?: number | null;
+  // Tippen auf das Ausrufezeichen schaltet den Checkpoint-Modus für diese Zeit um.
+  onToggleMode: (time: number) => void;
   onOpenBand: (kind: VitalKind, time: number, clientY?: number) => void;
 }
 
-export function CheckpointWarningLayer({ warnings, layout, xScale, selectedTime, interactionDisabled = false, onSelectTime, onOpenBand }: Props) {
+export function CheckpointWarningLayer({ warnings, layout, xScale, selectedTime, interactionDisabled = false, checkpointModeTime = null, onToggleMode, onOpenBand }: Props) {
   const [tooltipTime, setTooltipTime] = useState<number | null>(null);
   const projected = warnings.map((warning) => timeToX(xScale, warning.time));
   const minimumGap = projected.length > 1
@@ -58,9 +62,11 @@ export function CheckpointWarningLayer({ warnings, layout, xScale, selectedTime,
                 width={MIN_INTERACTIVE_TARGET_PX}
                 height={band.height}
                 fill="transparent"
-                pointerEvents={interactionDisabled ? "none" : undefined}
+                // Im Checkpoint-Modus übernimmt die darunterliegende Plot-Fläche die
+                // direkte Y-Eingabe; die Band-Trefferfläche gibt Pointer-Events frei.
+                pointerEvents={interactionDisabled || checkpointModeTime !== null ? "none" : undefined}
                 role="button"
-                tabIndex={interactionDisabled ? -1 : 0}
+                tabIndex={interactionDisabled || checkpointModeTime !== null ? -1 : 0}
                 aria-label={`${formatClock(warning.time)}: ${band.kind} nachtragen`}
                 data-testid={`checkpoint-band-${band.kind}-${warning.time}`}
                 className="checkpoint-band-hit"
@@ -78,8 +84,8 @@ export function CheckpointWarningLayer({ warnings, layout, xScale, selectedTime,
               />
             ))}
             <foreignObject
-              x={x - MIN_INTERACTIVE_TARGET_PX / 2}
-              y={layout.plotBottom + 8}
+              x={checkpointIconRect(x, layout.plotBottom).x}
+              y={checkpointIconRect(x, layout.plotBottom).y}
               width={MIN_INTERACTIVE_TARGET_PX}
               height={MIN_INTERACTIVE_TARGET_PX}
               pointerEvents={interactionDisabled ? "none" : undefined}
@@ -87,8 +93,11 @@ export function CheckpointWarningLayer({ warnings, layout, xScale, selectedTime,
               <button
                 type="button"
                 disabled={interactionDisabled}
+                aria-pressed={checkpointModeTime === warning.time}
                 className={`checkpoint-warning-button ${dense ? "checkpoint-warning-button--dense" : ""}`}
-                aria-label={`${formatClock(warning.time)}. ${tooltip}`}
+                aria-label={checkpointModeTime === warning.time
+                  ? `Kontrollzeit ${formatClock(warning.time)} aktiv. Zum Beenden erneut tippen.`
+                  : `${formatClock(warning.time)}. ${tooltip}. Zum direkten Nachtragen tippen.`}
                 data-testid={`checkpoint-warning-${warning.time}`}
                 style={{ width: MIN_INTERACTIVE_TARGET_PX, height: MIN_INTERACTIVE_TARGET_PX }}
                 onMouseEnter={() => setTooltipTime(warning.time)}
@@ -106,7 +115,7 @@ export function CheckpointWarningLayer({ warnings, layout, xScale, selectedTime,
                 onClick={(event) => {
                   event.stopPropagation();
                   const nearest = nearestTimeAtClientX(event.clientX, event.currentTarget.closest("svg") as SVGSVGElement | null);
-                  onSelectTime(nearest ?? warning.time);
+                  onToggleMode(nearest ?? warning.time);
                 }}
               >
                 <span

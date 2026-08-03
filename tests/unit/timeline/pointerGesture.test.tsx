@@ -39,4 +39,29 @@ describe("usePointerGesture", () => {
     });
     expect(onDragEnd).toHaveBeenCalledOnce();
   });
+
+  it("finalisiert einen laufenden Drag bei lostpointercapture (Safari-Geste)", () => {
+    const onDragEnd = vi.fn();
+    const onCancel = vi.fn();
+    const { result } = renderHook(() => usePointerGesture({ capture: true, threshold: 7, onDragEnd, onCancel }));
+    act(() => {
+      result.current.onPointerDown(pointerEvent());
+      result.current.onPointerMove(pointerEvent({ clientX: 30 }));
+      result.current.onLostPointerCapture(pointerEvent({ clientX: 30 }));
+    });
+    expect(onDragEnd).toHaveBeenCalledOnce();
+    expect(onCancel).not.toHaveBeenCalled();
+  });
+
+  it("verwirft einen noch nicht als Drag erkannten Kontakt bei lostpointercapture", () => {
+    const onDragEnd = vi.fn();
+    const onCancel = vi.fn();
+    const { result } = renderHook(() => usePointerGesture({ capture: true, threshold: 7, onDragEnd, onCancel }));
+    act(() => {
+      result.current.onPointerDown(pointerEvent());
+      result.current.onLostPointerCapture(pointerEvent());
+    });
+    expect(onCancel).toHaveBeenCalledOnce();
+    expect(onDragEnd).not.toHaveBeenCalled();
+  });
 });

@@ -95,3 +95,45 @@ export function isSecondTap(
 export function createPreview(seed: PreviewSeed, token: number, createdAt: number): TimelinePreview {
   return { ...seed, token, createdAt, expiresAt: createdAt + PREVIEW_TTL_MS };
 }
+
+/**
+ * Reiner Kreis-Treffertest fuer die abgelegte Vorschau. Der zweite Kontakt muss
+ * weder die duenne Linie noch den exakten Mittelpunkt treffen – ein Punkt
+ * irgendwo innerhalb des Trefferradius genuegt. Dadurch bleibt der beim ersten
+ * Kontakt festgelegte Zeitstempel maßgeblich (nicht die zweite Kontaktposition).
+ */
+export function isPointInsidePinnedPreviewCircle(
+  pointerX: number,
+  pointerY: number,
+  centerX: number,
+  centerY: number,
+  hitRadius: number,
+): boolean {
+  return Math.hypot(pointerX - centerX, pointerY - centerY) <= hitRadius;
+}
+
+/**
+ * Entscheidet, ob ein neuer Kontakt die vorhandene Vorschau bestaetigt: gleiche
+ * Art/Band/Lane, nicht abgelaufen und innerhalb des Kreis-Trefferradius. Wird
+ * bereits beim pointerdown ausgewertet, damit bei einem neuen (nicht
+ * bestaetigenden) Kontakt die alte Vorschau sofort entfernt werden kann.
+ */
+export function isPreviewConfirmHit(
+  preview: TimelinePreview | null,
+  candidate: {
+    kind: PreviewKind;
+    band: VitalKind | null;
+    lane: "medication" | "infusion" | "event" | null;
+    svgX: number;
+    svgY: number;
+  },
+  hitRadius: number,
+  now: number,
+): boolean {
+  if (!preview) return false;
+  if (isPreviewExpired(preview, now)) return false;
+  if (preview.kind !== candidate.kind) return false;
+  if (preview.kind === "vital" && preview.band !== candidate.band) return false;
+  if (preview.kind !== "vital" && preview.lane !== candidate.lane) return false;
+  return isPointInsidePinnedPreviewCircle(candidate.svgX, candidate.svgY, preview.svgX, preview.svgY, hitRadius);
+}

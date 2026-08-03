@@ -2,9 +2,10 @@
 
 import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { App } from "antd";
-import { BAND_ORDER, VITAL_CONFIG } from "../../lib/timeline/config";
-import { computeTimelineLayout } from "../../lib/timeline/geometry";
+import { BAND_ORDER, PREVIEW_CIRCLE_RADIUS_PX, PREVIEW_HIT_RADIUS_PX, VITAL_CONFIG } from "../../lib/timeline/config";
+import { bandAtY, computeTimelineLayout } from "../../lib/timeline/geometry";
 import { findNearestHit, type HitTarget } from "../../lib/timeline/hitTesting";
+import { clientToSvgPoint } from "../../lib/timeline/svgCoords";
 import { buildXScale, buildYScales, computeDomain, timeToX, xToTime } from "../../lib/timeline/scales";
 import { relativeTimelineTicks } from "../../lib/timeline/timeTicks";
 import { mapPointerToTimeline, type PointerMapResult } from "../../lib/timeline/pointerMapping";
@@ -16,7 +17,10 @@ import { deriveCriticalWarnings } from "../../lib/timeline/criticalValues";
 import { loadCriticalSettings, type CriticalSettings } from "../../lib/timeline/criticalSettingsStorage";
 import { toggleEventSelection } from "../../lib/timeline/eventSelection";
 import { maxDocumentableTime, type TimelineTimeError } from "../../lib/timeline/timeValidation";
-import { isSecondTap, usesTwoPhase, type TimelinePreview } from "../../lib/timeline/previewInteraction";
+import { isPreviewConfirmHit, usesTwoPhase, type TimelinePreview } from "../../lib/timeline/previewInteraction";
+import { clampDiastolic, clampMean, clampSystolic } from "../../lib/timeline/nibpDrag";
+import { placeTooltipAvoidingAll, type TooltipRect } from "../../lib/timeline/tooltipPlacement";
+import { checkpointIconRect, criticalIconRect } from "../../lib/timeline/warningIcons";
 import { eventDefinition } from "../../lib/timeline/events";
 import { useCurrentTime } from "../../hooks/useCurrentTime";
 import { useElementSize } from "../../hooks/useElementSize";
@@ -67,6 +71,9 @@ interface PlotPointerState {
   moved: boolean;
   dragging: boolean;
   targetId: string | null;
+  // Bestätigt dieser Kontakt eine bereits abgelegte Vorschau? Wird beim pointerdown
+  // entschieden, damit eine neue (nicht bestätigende) Geste die alte Vorschau sofort löscht.
+  confirming: boolean;
 }
 
 interface IntervalTooltipState {
@@ -74,6 +81,16 @@ interface IntervalTooltipState {
   x: number;
   y: number;
   locked: boolean;
+}
+
+type NibpComponent = "systolic" | "mean" | "diastolic";
+
+interface ActiveCheckpoint {
+  time: number;
+  nibpComponent: NibpComponent;
+  // Zwischenspeicher für NIBP-Komponenten, solange noch kein Mittelwert vorliegt
+  // (ohne Mittel kann keine echte Messung angelegt werden). Kein erfundener Wert.
+  nibpDraft: { systolic: number | null; mean: number | null; diastolic: number | null } | null;
 }
 
 const EMPTY_POINTER: PlotPointerState = {
@@ -85,6 +102,7 @@ const EMPTY_POINTER: PlotPointerState = {
   moved: false,
   dragging: false,
   targetId: null,
+  confirming: false,
 };
 
 export function VitalTimeline({ patientBirthDate = "" }: { patientBirthDate?: string }) {
@@ -93,6 +111,9 @@ export function VitalTimeline({ patientBirthDate = "" }: { patientBirthDate?: st
   const svgRef = useRef<SVGSVGElement | null>(null);
   const pointerRef = useRef<PlotPointerState>({ ...EMPTY_POINTER });
   const therapyEndPlacementRef = useRef<TherapyEndPlacement | null>(null);
+  // Merkt sich, ob der aktuelle Lane-Kontakt eine bestehende Vorschau bestätigt
+  // (Entscheidung beim pointerdown, ausgewertet beim pointerup).
+  const laneConfirmRef = useRef(false);
 
   const startedAt = useCaseStore((state) => state.startedAt);
   const caseId = useCaseStore((state) => state.caseId);
@@ -101,6 +122,7 @@ export function VitalTimeline({ patientBirthDate = "" }: { patientBirthDate?: st
   const medications = useCaseStore((state) => state.medications);
   const infusions = useCaseStore((state) => state.infusions);
   const events = useCaseStore((state) => state.events);
+  const addMeasurement = useCaseStore((state) => state.addMeasurement);
   const updateScalar = useCaseStore((state) => state.updateScalar);
   const updateNibp = useCaseStore((state) => state.updateNibp);
   const updateEventTime = useCaseStore((state) => state.updateEventTime);
@@ -117,6 +139,10 @@ export function VitalTimeline({ patientBirthDate = "" }: { patientBirthDate?: st
   const [lanePreview, setLanePreview] = useState<LanePlacementPreview | null>(null);
   const [intervalTooltip, setIntervalTooltip] = useState<IntervalTooltipState | null>(null);
   const [selectedCheckpoint, setSelectedCheckpoint] = useState<number | null>(null);
+  // Checkpoint-Eingabemodus (§11/§12): X ist auf die Kontrollzeit fixiert, der Stift
+  // legt nur den Y-Wert fest. Ein aktiver Modus schließt den Normalmodus aus.
+  const [activeCheckpoint, setActiveCheckpoint] = useState<ActiveCheckpoint | null>(null);
+  const checkpointDrag = useRef<{ active: boolean; pointerId: number; kind: VitalKind | null }>({ active: false, pointerId: -1, kind: null });
   const [therapyEndPlacement, setTherapyEndPlacement] = useState<TherapyEndPlacement | null>(null);
   const [criticalSettings, setCriticalSettings] = useState<CriticalSettings | null>(null);
   // Genau eine fluechtige Vorschau (Stift/Finger, iPad-Zwei-Schritt). Nie persistiert.
@@ -138,6 +164,8 @@ export function VitalTimeline({ patientBirthDate = "" }: { patientBirthDate?: st
       setSelectedEventType(null);
       setLanePreview(null);
       clearPreview();
+      setActiveCheckpoint(null);
+      setSelectedCheckpoint(null);
       therapyEndPlacementRef.current = null;
       setTherapyEndPlacement(null);
     };
@@ -173,6 +201,38 @@ export function VitalTimeline({ patientBirthDate = "" }: { patientBirthDate?: st
     () => criticalSettings ? deriveCriticalWarnings(measurements, criticalSettings.thresholds) : [],
     [criticalSettings, measurements],
   );
+
+  // Reale Bounding-Boxen aller sichtbaren Warn-Ausrufezeichen (kritisch + Checkpoint).
+  // Dieselbe Geometrie wie in den Warn-Ebenen; dient der Tooltip-Kollisionsvermeidung.
+  const warningIconRects = useMemo<TooltipRect[]>(() => {
+    const rects: TooltipRect[] = [];
+    for (const warning of criticalWarnings) {
+      const measurement = measurements.find((item) => item.id === warning.measurementId);
+      if (!measurement) continue;
+      const value = measurement.kind === "nibp" ? measurement.mean : measurement.value;
+      const markerX = timeToX(xScale, measurement.time);
+      if (markerX < layout.plotLeft || markerX > layout.plotRight) continue;
+      const markerY = yScales[measurement.kind](value);
+      rects.push(criticalIconRect(markerX, markerY, layout.bandByKind[measurement.kind].top, layout.plotRight));
+    }
+    for (const warning of checkpointWarnings) {
+      const x = timeToX(xScale, warning.time);
+      if (x < layout.plotLeft || x > layout.plotRight) continue;
+      rects.push(checkpointIconRect(x, layout.plotBottom));
+    }
+    return rects;
+  }, [criticalWarnings, checkpointWarnings, measurements, xScale, yScales, layout]);
+
+  // §11.F.10: Ist der aktive Checkpoint vollständig dokumentiert (kein Warnhinweis
+  // mehr), schließt der Checkpoint-Modus sicher von selbst.
+  useEffect(() => {
+    if (activeCheckpoint && !checkpointWarnings.some((warning) => warning.time === activeCheckpoint.time)) {
+      /* eslint-disable react-hooks/set-state-in-effect */
+      setActiveCheckpoint(null);
+      setSelectedCheckpoint((current) => (current === activeCheckpoint.time ? null : current));
+      /* eslint-enable react-hooks/set-state-in-effect */
+    }
+  }, [activeCheckpoint, checkpointWarnings]);
 
   const scalarsOf = (kind: VitalKind) =>
     measurements.filter((measurement): measurement is ScalarMeasurement => measurement.kind === kind);
@@ -308,6 +368,91 @@ export function VitalTimeline({ patientBirthDate = "" }: { patientBirthDate?: st
     else setDraft({ mode: "create-scalar", kind, time, value: pointerValue });
   };
 
+  // ---- Checkpoint-Eingabemodus (§11) ----
+  // Ausrufezeichen tippen schaltet den Modus um. X ist dann auf die Kontrollzeit
+  // fixiert; der Stift legt nur den Y-Wert fest, ohne Drawer.
+  const toggleCheckpointMode = (time: number) => {
+    if (activeCheckpoint && activeCheckpoint.time === time) {
+      const draft = activeCheckpoint.nibpDraft;
+      const hasRecord = nibps.some((measurement) => measurement.time === time);
+      if (draft && !hasRecord && (draft.systolic !== null || draft.mean !== null || draft.diastolic !== null)) {
+        message.info("Der Blutdruck dieser Kontrollzeit ist noch unvollständig und wurde nicht gespeichert.");
+      }
+      setActiveCheckpoint(null);
+      setSelectedCheckpoint(null);
+      setCrosshair(null);
+      return;
+    }
+    clearPreview();
+    setCrosshair(null);
+    setDraft(null);
+    setActiveCheckpoint({ time, nibpComponent: "mean", nibpDraft: null });
+    setSelectedCheckpoint(time);
+  };
+
+  // Y-Wert aus der Stiftposition; X bleibt auf der Kontrollzeit. Gibt den
+  // normalisierten Wert zurück (für das Speichern beim Loslassen).
+  const checkpointCrosshairAt = (kind: VitalKind, clientX: number, clientY: number, time: number): number => {
+    const band = layout.bandByKind[kind];
+    const point = clientToSvgPoint(svgRef.current, clientX, clientY);
+    const svgY = clampValue(point.y, band.innerTop, band.innerBottom);
+    const [min, max] = yScales[kind].domain();
+    const value = normalizeVitalPointerValue(kind, clampValue(yScales[kind].invert(svgY), min, max));
+    setCrosshair({
+      ok: true,
+      kind,
+      time,
+      value: kind === "nibp" ? null : value,
+      pointerValue: value,
+      svgX: timeToX(xScale, time),
+      svgY: yScales[kind](value),
+      locked: true,
+    });
+    return value;
+  };
+
+  const saveCheckpointScalar = (kind: VitalKind, value: number) => {
+    if (!activeCheckpoint || kind === "nibp") return;
+    try {
+      addMeasurement({ kind, time: activeCheckpoint.time, value });
+    } catch {
+      message.warning("Der SpO₂-Wert muss zwischen 0 und 100 % liegen.");
+    }
+  };
+
+  // Setzt genau eine NIBP-Komponente an der Kontrollzeit. Kein Wert wird erfunden:
+  // solange kein Mittel vorliegt, bleiben die Werte ein Entwurf (Ghost). Sobald ein
+  // Mittel gesetzt ist, entsteht eine echte Messung; fehlende Endpunkte bleiben null.
+  const saveCheckpointNibpComponent = (rawValue: number) => {
+    if (!activeCheckpoint) return;
+    const time = activeCheckpoint.time;
+    const component = activeCheckpoint.nibpComponent;
+    const existing = nibps.find((measurement) => measurement.time === time);
+    const base = activeCheckpoint.nibpDraft ?? {
+      systolic: existing?.systolic ?? null,
+      mean: existing?.mean ?? null,
+      diastolic: existing?.diastolic ?? null,
+    };
+    const [min, max] = yScales.nibp.domain();
+    const draft = { ...base };
+    if (component === "mean") {
+      draft.mean = clampMean(rawValue, base.systolic, base.diastolic, min, max);
+    } else if (typeof base.mean === "number") {
+      draft[component] = component === "systolic"
+        ? clampSystolic(rawValue, base.mean, min, max)
+        : clampDiastolic(rawValue, base.mean, min, max);
+    } else {
+      // Ohne Mittel noch keine Reihenfolge erzwingbar – Rohwert als Entwurf halten.
+      draft[component] = Math.round(rawValue);
+    }
+    if (typeof draft.mean === "number") {
+      addMeasurement({ kind: "nibp", time, systolic: draft.systolic, mean: draft.mean, diastolic: draft.diastolic });
+      setActiveCheckpoint({ ...activeCheckpoint, nibpDraft: null });
+    } else {
+      setActiveCheckpoint({ ...activeCheckpoint, nibpDraft: draft });
+    }
+  };
+
   const selectTherapyEnd = (
     kind: "medication" | "infusion",
     entry: MedicationEntry | InfusionEntry,
@@ -435,8 +580,27 @@ export function VitalTimeline({ patientBirthDate = "" }: { patientBirthDate?: st
       message.info("Bitte starten Sie zuerst den Fall.");
       return;
     }
+    // Checkpoint-Modus: der Kontakt legt direkt den Y-Wert des getroffenen Bandes fest.
+    if (activeCheckpoint) {
+      const rect = svgRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      const band = bandAtY(layout, event.clientY - rect.top);
+      if (!band) return;
+      checkpointDrag.current = { active: true, pointerId: event.pointerId, kind: band.kind };
+      if (usesTwoPhase(event.pointerType)) {
+        setInteractionActive(true);
+        if (typeof window !== "undefined") window.getSelection?.()?.removeAllRanges?.();
+      }
+      try { event.currentTarget.setPointerCapture(event.pointerId); } catch { /* ignore */ }
+      checkpointCrosshairAt(band.kind, event.clientX, event.clientY, activeCheckpoint.time);
+      return;
+    }
     const twoPhase = usesTwoPhase(event.pointerType);
-    if (twoPhase) setInteractionActive(true);
+    if (twoPhase) {
+      setInteractionActive(true);
+      // Kein Textauswahl-/Kopieren-Effekt beim Zeichnen mit Stift/Finger.
+      if (typeof window !== "undefined") window.getSelection?.()?.removeAllRanges?.();
+    }
     if (therapyEndPlacement) {
       const time = endTimeAtClientX(event.clientX);
       if (time !== null) previewTherapyEnd(time);
@@ -446,9 +610,6 @@ export function VitalTimeline({ patientBirthDate = "" }: { patientBirthDate?: st
     }
     setSelectedCheckpoint(null);
     const mapped = mapPointer(event.clientX, event.clientY);
-    // Auf dem iPad folgt die Koordinate erst dem Kontakt (locked: false); die Maus
-    // behaelt ihre sofort fixierte Vorschau.
-    if ("svgX" in mapped) setCrosshair({ ...mapped, locked: !twoPhase });
     const rect = svgRef.current?.getBoundingClientRect();
     const hit = rect
       ? findNearestHit(
@@ -457,6 +618,23 @@ export function VitalTimeline({ patientBirthDate = "" }: { patientBirthDate?: st
           event.pointerType,
         )
       : null;
+    const target = hit ? measurements.find((measurement) => measurement.id === hit.id) : null;
+    // Bestätigt dieser Kontakt die bestehende Vorschau? Nur wenn Stift/Finger, kein
+    // Treffer auf einen echten Messwert und der Kontakt im Trefferkreis der Vorschau.
+    const confirming = twoPhase && !target && "svgX" in mapped
+      ? isPreviewConfirmHit(
+          preview,
+          { kind: "vital", band: mapped.kind, lane: null, svgX: mapped.svgX, svgY: mapped.svgY },
+          PREVIEW_HIT_RADIUS_PX,
+          Date.now(),
+        )
+      : false;
+    // Neue (nicht bestätigende) Stift-/Finger-Geste: alte Vorschau SOFORT entfernen,
+    // damit nie zwei Vorschauen gleichzeitig sichtbar sind.
+    if (twoPhase && !confirming) clearPreview();
+    // Auf dem iPad folgt die Koordinate erst dem Kontakt (locked: false); die Maus
+    // behaelt ihre sofort fixierte Vorschau.
+    if ("svgX" in mapped) setCrosshair({ ...mapped, locked: !twoPhase });
     pointerRef.current = {
       active: true,
       pointerId: event.pointerId,
@@ -466,8 +644,8 @@ export function VitalTimeline({ patientBirthDate = "" }: { patientBirthDate?: st
       moved: false,
       dragging: false,
       targetId: hit?.id ?? null,
+      confirming,
     };
-    const target = hit ? measurements.find((measurement) => measurement.id === hit.id) : null;
     // Skalar-Drag (alle Zeiger) oder eine Stift-/Finger-Vorschaugeste benoetigen
     // Pointer-Capture, damit Move/Up zuverlaessig auf der Grafik ankommen.
     if ((target && target.kind !== "nibp") || twoPhase) {
@@ -477,6 +655,10 @@ export function VitalTimeline({ patientBirthDate = "" }: { patientBirthDate?: st
 
   const onPlotPointerMove = (event: ReactPointerEvent<SVGRectElement>) => {
     const state = pointerRef.current;
+    if (checkpointDrag.current.active && checkpointDrag.current.pointerId === event.pointerId && activeCheckpoint) {
+      if (checkpointDrag.current.kind) checkpointCrosshairAt(checkpointDrag.current.kind, event.clientX, event.clientY, activeCheckpoint.time);
+      return;
+    }
     if (therapyEndPlacement) {
       const time = endTimeAtClientX(event.clientX);
       if (time !== null) previewTherapyEnd(time);
@@ -503,7 +685,8 @@ export function VitalTimeline({ patientBirthDate = "" }: { patientBirthDate?: st
       return;
     }
     // Stift/Finger auf freier Flaeche: die Koordinate folgt dem Kontakt live.
-    if (!state.targetId && usesTwoPhase(event.pointerType)) {
+    // Während einer Bestätigungsgeste bleibt die abgelegte Vorschau maßgeblich.
+    if (!state.targetId && !state.confirming && usesTwoPhase(event.pointerType)) {
       const mapped = mapPointer(event.clientX, event.clientY);
       setCrosshair("svgX" in mapped ? { ...mapped, locked: false } : null);
     }
@@ -511,13 +694,26 @@ export function VitalTimeline({ patientBirthDate = "" }: { patientBirthDate?: st
 
   const onSvgPointerMove = (event: ReactPointerEvent<SVGSVGElement>) => {
     if (event.pointerType !== "mouse" && event.pointerType !== "pen") return;
-    if (pointerRef.current.active || draft || therapyDraft || therapyEndPlacementRef.current || preview) return;
+    if (pointerRef.current.active || checkpointDrag.current.active || activeCheckpoint || draft || therapyDraft || therapyEndPlacementRef.current || preview) return;
     const mapped = mapPointer(event.clientX, event.clientY);
     setCrosshair("svgX" in mapped ? { ...mapped, locked: false } : null);
     setIntervalTooltip(intervalAtPointer(event.clientX, event.clientY, false));
   };
 
   const onPlotPointerUp = (event: ReactPointerEvent<SVGRectElement>) => {
+    if (checkpointDrag.current.active && checkpointDrag.current.pointerId === event.pointerId) {
+      const kind = checkpointDrag.current.kind;
+      const value = kind && activeCheckpoint ? checkpointCrosshairAt(kind, event.clientX, event.clientY, activeCheckpoint.time) : null;
+      try { event.currentTarget.releasePointerCapture(event.pointerId); } catch { /* ignore */ }
+      checkpointDrag.current = { active: false, pointerId: -1, kind: null };
+      setInteractionActive(false);
+      if (kind && value !== null) {
+        if (kind === "nibp") saveCheckpointNibpComponent(value);
+        else saveCheckpointScalar(kind, value);
+      }
+      setCrosshair(null);
+      return;
+    }
     const state = pointerRef.current;
     const twoPhase = usesTwoPhase(event.pointerType);
     const finish = () => {
@@ -565,7 +761,13 @@ export function VitalTimeline({ patientBirthDate = "" }: { patientBirthDate?: st
         finish();
         return;
       }
-      // Stift/Finger: erster Kontakt legt Vorschau ab, zweiter Kontakt bestaetigt.
+      // Stift/Finger: bestätigt dieser Kontakt die (beim pointerdown erkannte)
+      // Vorschau, öffnet er das Formular; sonst legt er eine neue Vorschau ab.
+      if (state.confirming && preview) {
+        openCreateFromVitalPreview();
+        finish();
+        return;
+      }
       if (!mapped.ok) {
         showTimeError(mapped.reason);
         clearPreview();
@@ -573,13 +775,8 @@ export function VitalTimeline({ patientBirthDate = "" }: { patientBirthDate?: st
         finish();
         return;
       }
-      const candidate = { kind: "vital" as const, band: mapped.kind, lane: null, svgX: mapped.svgX, svgY: mapped.svgY, pointerType: event.pointerType };
-      if (isSecondTap(preview, candidate, Date.now())) {
-        openCreateFromVitalPreview();
-      } else {
-        pinVitalPreview(mapped, event.pointerType);
-        setCrosshair(null);
-      }
+      pinVitalPreview(mapped, event.pointerType);
+      setCrosshair(null);
       finish();
       return;
     }
@@ -589,10 +786,36 @@ export function VitalTimeline({ patientBirthDate = "" }: { patientBirthDate?: st
   const onPlotPointerCancel = () => {
     setDragPreview(null);
     setIntervalTooltip(null);
+    if (checkpointDrag.current.active) {
+      checkpointDrag.current = { active: false, pointerId: -1, kind: null };
+      setCrosshair(null);
+    }
     if (therapyEndPlacement) {
       therapyEndPlacementRef.current = null;
       setTherapyEndPlacement(null);
     }
+    resetPointer();
+    setInteractionActive(false);
+  };
+
+  // Safari kann die Capture mitten im Vorgang verlieren. Ein laufender Skalar-Drag
+  // wird sicher abgeschlossen; danach werden Vorgang und Scroll-Sperre freigegeben,
+  // damit die Seite nie in gesperrtem Zustand hängen bleibt.
+  const onPlotLostPointerCapture = () => {
+    if (checkpointDrag.current.active) {
+      checkpointDrag.current = { active: false, pointerId: -1, kind: null };
+      setCrosshair(null);
+      setInteractionActive(false);
+      return;
+    }
+    const state = pointerRef.current;
+    if (state.active && state.dragging && state.targetId) {
+      const target = measurements.find(
+        (measurement): measurement is ScalarMeasurement => measurement.id === state.targetId && measurement.kind !== "nibp",
+      );
+      if (target) finishScalarDrag(target);
+    }
+    setDragPreview(null);
     resetPointer();
     setInteractionActive(false);
   };
@@ -630,8 +853,25 @@ export function VitalTimeline({ patientBirthDate = "" }: { patientBirthDate?: st
     message.success("Ereignis platziert.");
   };
 
-  // Stift/Finger auf den Lanes: erster Kontakt legt eine Vorschau ab, ein zweiter
-  // Kontakt auf dieselbe Lane bestaetigt und oeffnet das passende Formular.
+  // Lane-Kontakt beginnt: bestätigt er die bestehende Vorschau (Kreis-Treffer),
+  // bleibt sie erhalten; sonst wird die alte Vorschau SOFORT entfernt.
+  const handleLaneTwoPhaseDown = (info: {
+    kind: "medication" | "infusion" | "event";
+    svgX: number;
+    svgY: number;
+  }) => {
+    const confirm = isPreviewConfirmHit(
+      preview,
+      { kind: info.kind, band: null, lane: info.kind, svgX: info.svgX, svgY: info.svgY },
+      PREVIEW_HIT_RADIUS_PX,
+      Date.now(),
+    );
+    laneConfirmRef.current = confirm;
+    if (!confirm) clearPreview();
+  };
+
+  // Lane-Kontakt endet: bestätigt er die Vorschau, öffnet er das passende Formular
+  // mit dem in der Vorschau gespeicherten Zeitstempel (nie aus der zweiten Position).
   const handleLaneTwoPhaseTap = (info: {
     kind: "medication" | "infusion" | "event";
     time: number;
@@ -640,15 +880,17 @@ export function VitalTimeline({ patientBirthDate = "" }: { patientBirthDate?: st
     pointerType: string;
     eventType?: TimelineEventType;
   }) => {
-    const candidate = { kind: info.kind, band: null, lane: info.kind, svgX: info.svgX, svgY: info.svgY, pointerType: info.pointerType };
-    if (isSecondTap(preview, candidate, Date.now()) && preview) {
+    if (laneConfirmRef.current && preview) {
       const time = preview.time;
+      const eventType = preview.eventType;
+      laneConfirmRef.current = false;
+      clearPreview();
       if (info.kind === "medication") openTherapyDraft({ mode: "create-medication", startedAt: time });
       else if (info.kind === "infusion") openTherapyDraft({ mode: "create-infusion", startedAt: time });
-      else if (preview.eventType) placeEvent(preview.eventType, time);
-      clearPreview();
+      else if (eventType) placeEvent(eventType, time);
       return;
     }
+    laneConfirmRef.current = false;
     setPreview({
       kind: info.kind,
       pointerType: info.pointerType,
@@ -678,6 +920,9 @@ export function VitalTimeline({ patientBirthDate = "" }: { patientBirthDate?: st
   };
 
   const showData = startedAt !== null;
+  // Kollisionsbewusste Position des Koordinaten-Tooltips (meidet die Warn-Icons);
+  // wird zusätzlich als Hindernis an den Therapie-Tooltip weitergegeben.
+  const crosshairTip = crosshair ? crosshairTooltipRect(crosshair, layout, warningIconRects) : null;
 
   return (
     <>
@@ -700,6 +945,14 @@ export function VitalTimeline({ patientBirthDate = "" }: { patientBirthDate?: st
             data-testid="vital-timeline-svg"
             style={{ touchAction: "pan-y", display: "block" }}
             onPointerMove={onSvgPointerMove}
+            // Kein Kontextmenü / kein Drag-Ghost / keine blaue Auswahl auf der Grafik.
+            onContextMenu={(event) => event.preventDefault()}
+            onDragStart={(event) => event.preventDefault()}
+            onPointerDownCapture={(event) => {
+              if (event.pointerType !== "mouse" && typeof window !== "undefined") {
+                window.getSelection?.()?.removeAllRanges?.();
+              }
+            }}
             onPointerLeave={() => {
               if (!crosshair?.locked && !draft) setCrosshair(null);
               if (!intervalTooltip?.locked) setIntervalTooltip(null);
@@ -727,6 +980,7 @@ export function VitalTimeline({ patientBirthDate = "" }: { patientBirthDate?: st
                 onCreateInfusion={(time) => openTherapyDraft({ mode: "create-infusion", startedAt: time })}
                 onPlaceEvent={placeEvent}
                 onTwoPhaseTap={handleLaneTwoPhaseTap}
+                onTwoPhaseDown={handleLaneTwoPhaseDown}
                 onInteractionActive={setInteractionActive}
                 onInvalid={showTimeError}
                 onMissingEvent={() => message.warning("Bitte zuerst links ein Ereignissymbol auswählen.")}
@@ -771,6 +1025,7 @@ export function VitalTimeline({ patientBirthDate = "" }: { patientBirthDate?: st
                 if (time !== null) commitTherapyEnd(time);
               }}
               onPointerCancel={onPlotPointerCancel}
+              onLostPointerCapture={onPlotLostPointerCapture}
               onPointerLeave={() => {
                 if (!crosshair?.locked && !draft) setCrosshair(null);
                 if (!intervalTooltip?.locked) setIntervalTooltip(null);
@@ -785,12 +1040,18 @@ export function VitalTimeline({ patientBirthDate = "" }: { patientBirthDate?: st
                   xScale={xScale}
                   selectedTime={selectedCheckpoint}
                   interactionDisabled={therapyEndPlacement !== null}
-                  onSelectTime={(time) => {
-                    setSelectedCheckpoint(time);
-                    setCrosshair(null);
-                  }}
+                  checkpointModeTime={activeCheckpoint?.time ?? null}
+                  onToggleMode={toggleCheckpointMode}
                   onOpenBand={openCheckpointBand}
                 />
+                {activeCheckpoint ? (
+                  <NibpComponentPicker
+                    layout={layout}
+                    selected={activeCheckpoint.nibpComponent}
+                    filled={nibpFilledComponents(nibps, activeCheckpoint)}
+                    onSelect={(component) => setActiveCheckpoint((current) => (current ? { ...current, nibpComponent: component } : current))}
+                  />
+                ) : null}
                 <NibpHandleLayer
                   measurements={nibps}
                   ctx={ctx}
@@ -832,9 +1093,15 @@ export function VitalTimeline({ patientBirthDate = "" }: { patientBirthDate?: st
               </>
             ) : null}
             {intervalTooltip ? (
-              <TherapyIntervalTooltip items={intervalTooltip.items} x={intervalTooltip.x} y={intervalTooltip.y} layout={layout} avoidRect={crosshairTooltipRect(crosshair, layout)} />
+              <TherapyIntervalTooltip
+                items={intervalTooltip.items}
+                x={intervalTooltip.x}
+                y={intervalTooltip.y}
+                layout={layout}
+                avoidRects={crosshairTip ? [crosshairTip, ...warningIconRects] : warningIconRects}
+              />
             ) : null}
-            <CrosshairLayer crosshair={crosshair} layout={layout} />
+            <CrosshairLayer crosshair={crosshair} layout={layout} tooltipRect={crosshairTip} />
             <TimelinePreviewLayer preview={preview} layout={layout} xScale={xScale} yScales={yScales} />
             {renderDraftPreview(draft, xScale, yScales)}
           </svg>
@@ -864,23 +1131,24 @@ function crosshairForMeasurement(
   };
 }
 
-function crosshairTooltipRect(crosshair: CrosshairState | null, layout: BandContext["layout"]) {
-  if (!crosshair) return null;
-  const band = layout.bandByKind[crosshair.kind];
+// Kollisionsbewusste Position des Koordinaten-Tooltips: bleibt im Band, meidet die
+// übergebenen Warn-Icon-Boxen (rechts→links kippen, dann vertikaler Versatz).
+function crosshairTooltipRect(crosshair: CrosshairState, layout: BandContext["layout"], avoid: TooltipRect[]): TooltipRect {
   const width = 214;
   const height = crosshair.ok ? 28 : 43;
-  return {
-    x: crosshair.svgX > layout.plotRight - 230 ? crosshair.svgX - 224 : crosshair.svgX + 10,
-    y: clampValue(crosshair.svgY - 42, band.top + 4, band.bottom - height - 4),
-    width,
-    height,
-  };
+  // Bevorzugt nahe am Zeiger im eigenen Band; bei Kollision mit einem Warn-Icon
+  // darf der Tooltip innerhalb des gesamten Plots ausweichen (nie das Icon verdecken).
+  return placeTooltipAvoidingAll(
+    { x: crosshair.svgX, y: crosshair.svgY },
+    { width, height },
+    { left: layout.plotLeft, top: layout.plotTop, right: layout.plotRight, bottom: layout.plotBottom },
+    avoid,
+  );
 }
 
-function CrosshairLayer({ crosshair, layout }: { crosshair: CrosshairState | null; layout: BandContext["layout"] }) {
-  if (!crosshair) return null;
+function CrosshairLayer({ crosshair, layout, tooltipRect }: { crosshair: CrosshairState | null; layout: BandContext["layout"]; tooltipRect: TooltipRect | null }) {
+  if (!crosshair || !tooltipRect) return null;
   const config = VITAL_CONFIG[crosshair.kind];
-  const tooltipRect = crosshairTooltipRect(crosshair, layout)!;
   const labelX = tooltipRect.x;
   const labelY = tooltipRect.y;
   const valueLabel = crosshair.kind === "nibp"
@@ -915,8 +1183,8 @@ const PREVIEW_SHORT_LABEL: Record<VitalKind, string> = {
   temperature: "Temp",
 };
 
-// Zeichnet die eine aktive, fluechtige Vorschau. Bewusst gestrichelt und mit "+"
-// markiert, damit sie nie wie ein gespeicherter Messwert aussieht.
+// Zeichnet die eine aktive, fluechtige Vorschau. Bewusst gestrichelt (Kreis bzw.
+// Punkt), damit sie nie wie ein gespeicherter Messwert aussieht. Kein "+"-Zeichen.
 function TimelinePreviewLayer({
   preview,
   layout,
@@ -943,7 +1211,6 @@ function TimelinePreviewLayer({
       <g pointerEvents="none" data-testid="timeline-preview" data-preview-kind="vital">
         <line x1={x} y1={layout.contentTop} x2={x} y2={layout.plotBottom} className="timeline-preview-line" />
         <circle cx={x} cy={y} r={7} className="timeline-preview-dot" />
-        <text x={x + 9} y={y - 7} className="timeline-preview-plus">+</text>
         <rect x={tipX} y={tipY} width={182} height={20} rx={5} className="timeline-preview-tooltip" />
         <text x={tipX + 7} y={tipY + 14} className="timeline-preview-tooltip-text" data-testid="preview-coordinate">{label}</text>
       </g>
@@ -957,15 +1224,70 @@ function TimelinePreviewLayer({
       : layout.therapyLanes[2];
   const isEvent = preview.kind === "event";
   const definition = preview.eventType ? eventDefinition(preview.eventType) : null;
+  // Kreis mittig auf der Zeitlinie; großzügige Zielfläche für den zweiten Kontakt.
+  const circleY = (lane.top + lane.bottom) / 2;
   const tipY = lane.bottom - 24;
   return (
     <g pointerEvents="none" data-testid="timeline-preview" data-preview-kind={preview.kind}>
       <line x1={x} y1={lane.top} x2={x} y2={layout.plotBottom} className={`timeline-preview-line ${isEvent ? "timeline-preview-line--event" : ""}`} />
+      <circle cx={x} cy={circleY} r={PREVIEW_CIRCLE_RADIUS_PX} className={`timeline-preview-circle ${isEvent ? "timeline-preview-circle--event" : ""}`} data-testid="preview-circle" />
       {definition ? <text x={x} y={lane.top + 18} textAnchor="middle" className="timeline-preview-symbol">{definition.symbol}</text> : null}
-      <text x={x + 9} y={lane.top + 14} className={`timeline-preview-plus ${isEvent ? "timeline-preview-plus--event" : ""}`}>+</text>
       <rect x={tipX} y={tipY} width={110} height={20} rx={5} className="timeline-preview-tooltip" />
       <text x={tipX + 7} y={tipY + 14} className="timeline-preview-tooltip-text" data-testid="preview-coordinate">{formatClock(preview.time)}</text>
     </g>
+  );
+}
+
+// Welche NIBP-Komponenten sind an der Kontrollzeit bereits gesetzt (Datensatz oder Entwurf)?
+function nibpFilledComponents(nibps: NibpMeasurement[], active: ActiveCheckpoint): Record<NibpComponent, boolean> {
+  const record = nibps.find((measurement) => measurement.time === active.time);
+  const draft = active.nibpDraft;
+  const effective = (component: NibpComponent): number | null => {
+    if (draft) return draft[component];
+    if (!record) return null;
+    return component === "mean" ? record.mean : record[component];
+  };
+  return {
+    systolic: Number.isFinite(effective("systolic") ?? Number.NaN),
+    mean: Number.isFinite(effective("mean") ?? Number.NaN),
+    diastolic: Number.isFinite(effective("diastolic") ?? Number.NaN),
+  };
+}
+
+// Inline-Auswahl der NIBP-Komponente im Checkpoint-Modus – bewusst kein Drawer.
+// Erst die gewählte Komponente wird beim nächsten Stiftkontakt gesetzt; die anderen
+// beiden bleiben unverändert. Kein Wert wird aus einer einzelnen Y-Position erraten.
+function NibpComponentPicker({
+  layout,
+  selected,
+  filled,
+  onSelect,
+}: {
+  layout: BandContext["layout"];
+  selected: NibpComponent;
+  filled: Record<NibpComponent, boolean>;
+  onSelect: (component: NibpComponent) => void;
+}) {
+  const band = layout.bandByKind.nibp;
+  const items: Array<[NibpComponent, string]> = [["systolic", "Sys"], ["mean", "Mittel"], ["diastolic", "Dia"]];
+  return (
+    <foreignObject x={6} y={band.top + 52} width={166} height={34} data-testid="nibp-component-picker" aria-label="Blutdruck-Komponente für die Kontrollzeit wählen">
+      <div className="nibp-component-picker">
+        {items.map(([key, label]) => (
+          <button
+            key={key}
+            type="button"
+            aria-pressed={selected === key}
+            data-testid={`nibp-component-${key}`}
+            className={`nibp-component-button ${selected === key ? "nibp-component-button--selected" : ""} ${filled[key] ? "nibp-component-button--filled" : ""}`}
+            onPointerDown={(event) => event.stopPropagation()}
+            onClick={(event) => { event.stopPropagation(); onSelect(key); }}
+          >
+            {label}{filled[key] ? " ✓" : ""}
+          </button>
+        ))}
+      </div>
+    </foreignObject>
   );
 }
 

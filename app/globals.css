@@ -1070,3 +1070,84 @@ textarea::placeholder {
   font-size: 11px;
   font-weight: 700;
 }
+
+/* Gestrichelter Vorschau-Kreis der Lanes (Medikamente/Infusionen/Ereignisse).
+   Großzügige Zielfläche für den zweiten Kontakt; sieht bewusst nicht wie ein
+   echter Marker aus. Kein "+"-Zeichen. */
+.timeline-preview-circle {
+  fill: none;
+  stroke: #1f7a63;
+  stroke-width: 1.75;
+  stroke-dasharray: 4 3;
+}
+
+.timeline-preview-circle--event {
+  stroke: #8b5e00;
+}
+
+/* ---- iPad/Safari: keine blaue Textauswahl, kein Tap-Highlight, kein Callout ---- */
+/* Gilt nur für die Timeline und ihre interaktiven SVG-Ebenen. Drawer-Formulare
+   liegen als Portal außerhalb von .timeline-surface und bleiben normal auswählbar. */
+.timeline-surface,
+.timeline-surface svg,
+.timeline-surface svg * {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Sichtbarer, kontrollierter schwarzer Rahmen für den aktiven Checkpoint
+   (statt der blauen Safari-Auswahl-/Fokus-Darstellung). */
+.checkpoint-warning-button[aria-pressed="true"] .checkpoint-warning-icon {
+  box-shadow: 0 0 0 2px #ffffff, 0 0 0 4px #000000;
+  border-color: #ffffff;
+}
+
+/* Inline-Auswahl der NIBP-Komponente im Checkpoint-Modus (kein Drawer). */
+.nibp-component-picker {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  height: 100%;
+}
+
+.nibp-component-button {
+  padding: 3px 7px;
+  border: 1px solid #94a6b1;
+  border-radius: 6px;
+  background: #ffffff;
+  color: #334155;
+  font: 700 11px/1.2 system-ui, sans-serif;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.nibp-component-button--selected {
+  background: #0f172a;
+  border-color: #0f172a;
+  color: #ffffff;
+}
+
+.nibp-component-button--filled {
+  border-color: #1f7a63;
+  color: #14603f;
+}
+
+.nibp-component-button--selected.nibp-component-button--filled {
+  background: #14603f;
+  border-color: #14603f;
+  color: #ffffff;
+}
+
+.nibp-component-button:focus-visible {
+  outline: 2px solid #0f172a;
+  outline-offset: 1px;
+}
+
+.checkpoint-scalar-ghost {
+  fill: none;
+  stroke: #0f172a;
+  stroke-width: 2;
+  stroke-dasharray: 3 2.5;
+}

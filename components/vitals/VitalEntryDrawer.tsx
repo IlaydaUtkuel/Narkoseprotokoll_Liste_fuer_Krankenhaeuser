@@ -9,6 +9,7 @@ import {
   timestampFromClockParts,
   validateTimelineTime,
 } from "../../lib/timeline/timeValidation";
+import { resetDrawerScrollTop } from "../../lib/timeline/drawerScroll";
 import { useCaseStore } from "../../store/anesthesiaCaseStore";
 import type { EntryDraft } from "./timelineTypes";
 import type { ScalarKind } from "../../types/vitals";
@@ -64,6 +65,7 @@ export function VitalEntryDrawer({ draft, onClose }: Props) {
       onClose={onClose}
       destroyOnHidden
       rootClassName="vital-entry-drawer"
+      afterOpenChange={(opened) => { if (opened) resetDrawerScrollTop("vital-entry-drawer"); }}
     >
       {draft ? (
         <div style={{ maxWidth: 460, margin: "0 auto" }}>

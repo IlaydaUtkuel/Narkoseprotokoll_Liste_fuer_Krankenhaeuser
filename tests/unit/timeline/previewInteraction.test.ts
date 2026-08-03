@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   createPreview,
   exceedsMovementThreshold,
+  isPointInsidePinnedPreviewCircle,
+  isPreviewConfirmHit,
   isPreviewExpired,
   isSecondTap,
   movementThreshold,
@@ -9,7 +11,7 @@ import {
   usesTwoPhase,
   type PreviewSeed,
 } from "@/lib/timeline/previewInteraction";
-import { PREVIEW_TTL_MS } from "@/lib/timeline/config";
+import { PREVIEW_HIT_RADIUS_PX, PREVIEW_TTL_MS } from "@/lib/timeline/config";
 
 function vitalSeed(overrides: Partial<PreviewSeed> = {}): PreviewSeed {
   return {
@@ -77,5 +79,31 @@ describe("previewInteraction", () => {
 
   it("liefert null-Vorschau als kein zweiter Tap", () => {
     expect(isSecondTap(null, { kind: "vital", band: "spo2", lane: null, svgX: 0, svgY: 0, pointerType: "pen" }, 0)).toBe(false);
+  });
+
+  it("Kreis-Treffertest: jeder Punkt innerhalb des Radius zählt", () => {
+    expect(isPointInsidePinnedPreviewCircle(400, 200, 400, 200, 22)).toBe(true);
+    expect(isPointInsidePinnedPreviewCircle(418, 200, 400, 200, 22)).toBe(true); // 18 px seitlich
+    expect(isPointInsidePinnedPreviewCircle(400, 220, 400, 200, 22)).toBe(true); // 20 px vertikal
+    expect(isPointInsidePinnedPreviewCircle(430, 200, 400, 200, 22)).toBe(false); // 30 px zu weit
+  });
+
+  it("Bestätigungs-Treffer: Kreis um die abgelegte Lane-Vorschau, unabhängig vom exakten X", () => {
+    const preview = createPreview(
+      vitalSeed({ kind: "medication", band: null, lane: "medication", value: null, unit: null, svgX: 400, svgY: 60 }),
+      3,
+      0,
+    );
+    const cand = (x: number, y: number, lane: "medication" | "infusion") => ({ kind: lane, band: null, lane, svgX: x, svgY: y });
+    // Innerhalb des 22-px-Kreises, aber NICHT exakt auf der Linie -> bestätigt.
+    expect(isPreviewConfirmHit(preview, cand(415, 70, "medication"), PREVIEW_HIT_RADIUS_PX, 500)).toBe(true);
+    // Zu weit weg -> neue Vorschau, keine Bestätigung.
+    expect(isPreviewConfirmHit(preview, cand(460, 60, "medication"), PREVIEW_HIT_RADIUS_PX, 500)).toBe(false);
+    // Andere Lane -> keine Bestätigung.
+    expect(isPreviewConfirmHit(preview, cand(400, 60, "infusion"), PREVIEW_HIT_RADIUS_PX, 500)).toBe(false);
+    // Abgelaufen -> keine Bestätigung.
+    expect(isPreviewConfirmHit(preview, cand(400, 60, "medication"), PREVIEW_HIT_RADIUS_PX, PREVIEW_TTL_MS + 1)).toBe(false);
+    // Keine Vorschau -> keine Bestätigung.
+    expect(isPreviewConfirmHit(null, cand(400, 60, "medication"), PREVIEW_HIT_RADIUS_PX, 0)).toBe(false);
   });
 });

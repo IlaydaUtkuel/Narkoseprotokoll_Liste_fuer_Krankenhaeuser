@@ -10,6 +10,7 @@ import {
   type NibpTriple,
 } from "../../lib/timeline/nibpDrag";
 import { timeToX, xToTime } from "../../lib/timeline/scales";
+import { clientToSvgPoint } from "../../lib/timeline/svgCoords";
 import { usePointerGesture } from "../../hooks/useTimelinePointer";
 import { MeasurementHit } from "./MeasurementHit";
 import type { BandContext } from "./timelineTypes";
@@ -156,11 +157,13 @@ function NibpHandles({
       state.mode = Math.abs(dx) >= Math.abs(dy) ? "time" : "mean";
     }
     if (!state.mode) return;
-    const rect = event.currentTarget.ownerSVGElement?.getBoundingClientRect();
-    if (!rect) return;
+    // getScreenCTM-basierte Umrechnung: robust gegen Safari-Zoom, Seiten-Scroll
+    // und responsive SVG-Skalierung – kein „Springen“ beim Ziehen.
+    const svg = event.currentTarget.ownerSVGElement;
+    const point = clientToSvgPoint(svg, event.clientX, event.clientY);
     const base = dragSnapshot.current ?? snapshot();
     if (state.mode === "time") {
-      const x = clampValue(event.clientX - rect.left, ctx.layout.plotLeft, ctx.layout.plotRight);
+      const x = clampValue(point.x, ctx.layout.plotLeft, ctx.layout.plotRight);
       const time = Math.round(clampValue(xToTime(ctx.xScale, x), ctx.startedAt, ctx.now));
       const next = { mode: "time" as const, time, mean: base.mean };
       meanPreviewRef.current = next;
@@ -168,7 +171,7 @@ function NibpHandles({
     } else {
       const [min, max] = yScale.domain();
       // Nur das Mittel folgt dem Pointer; Systolisch und Diastolisch begrenzen es.
-      const { mean } = applyNibpDrag(base, "mean", yScale.invert(event.clientY - rect.top), min, max);
+      const { mean } = applyNibpDrag(base, "mean", yScale.invert(point.y), min, max);
       const next = { mode: "mean" as const, time: measurement.time, mean };
       meanPreviewRef.current = next;
       setMeanPreview(next);
@@ -196,11 +199,10 @@ function NibpHandles({
 
   const previewFromPointer = (part: NibpPart, event: ReactPointerEvent<Element>) => {
     const owner = event.currentTarget as SVGGraphicsElement;
-    const rect = owner.ownerSVGElement?.getBoundingClientRect();
-    if (!rect) return;
+    const point = clientToSvgPoint(owner.ownerSVGElement, event.clientX, event.clientY);
     const base = dragSnapshot.current ?? snapshot();
     const [scaleMin, scaleMax] = yScale.domain();
-    const raw = yScale.invert(event.clientY - rect.top);
+    const raw = yScale.invert(point.y);
     const next = applyNibpDrag(base, part, raw, scaleMin, scaleMax);
     setActive(true);
     setPreview({ part, value: (part === "systolic" ? next.systolic : next.diastolic) as number });
@@ -265,6 +267,7 @@ function NibpHandles({
         }}
         onPointerMove={updateMeanPreview}
         onPointerUp={finishMeanDrag}
+        onLostPointerCapture={finishMeanDrag}
         onPointerCancel={(event) => {
           if (meanDrag.current.pointerId !== event.pointerId) return;
           meanDrag.current = { active: false, pointerId: -1, startX: 0, startY: 0, mode: null };

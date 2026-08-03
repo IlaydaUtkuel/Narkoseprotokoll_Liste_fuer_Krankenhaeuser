@@ -70,6 +70,14 @@ export const PREVIEW_TTL_MS = 3000;
 // damit die Reihenfolge systolic > mean > diastolic beim Ziehen erhalten bleibt.
 export const MIN_NIBP_GAP = 1;
 
+// Sichtbarer Radius des gestrichelten Vorschau-Kreises (Medikamente/Infusionen).
+// Durchmesser ~32 px – deutlich sichtbar, aber nicht wie ein echter Messwert.
+export const PREVIEW_CIRCLE_RADIUS_PX = 16;
+
+// Unsichtbarer Trefferradius der abgelegten Vorschau: der zweite Kontakt muss die
+// exakte Linie nicht treffen. 22 px ⇒ 44×44 px Zielgröße (WCAG-nah).
+export const PREVIEW_HIT_RADIUS_PX = 22;
+
 // WCAG-nahe Mindestgroesse fuer primaere Touch-/Pen-Ziele. Sichtbare Symbole
 // duerfen kleiner bleiben; ihr interaktiver Container verwendet diesen Wert.
 export const MIN_INTERACTIVE_TARGET_PX = 46;

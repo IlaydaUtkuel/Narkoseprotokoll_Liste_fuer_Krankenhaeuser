@@ -664,41 +664,53 @@ test("Extra-Ereignis öffnet einen Kommentar-Entwurf, persistiert den Text und l
   await expect(page.getByTestId("event-extra")).toHaveCount(0);
 });
 
-test("relative 5-Minuten-Warnung öffnet den exakten Bandwert und verschwindet erst bei vier vollständigen Vitalwerten", async ({ page }) => {
+test("Checkpoint-Modus: Ausrufezeichen aktiviert direkte Y-Eingabe, Warnung verschwindet erst bei vier vollständigen Vitalwerten", async ({ page }) => {
   await page.goto("/dokumentation");
   const startedAt = await seedStartedCase(page, 6);
   const checkpoint = startedAt + 5 * 60_000;
   const warning = page.getByTestId(`checkpoint-warning-${checkpoint}`);
   await expect(warning).toBeVisible();
+  // Ausrufezeichen tippen -> Checkpoint-Modus AN (aria-pressed + Kontrollzeit-Linie).
   await warning.click();
+  await expect(warning).toHaveAttribute("aria-pressed", "true");
   await expect(page.getByTestId("checkpoint-selection")).toContainText(/Kontrollzeit/);
 
-  const addAtCheckpoint = async (kind: "spo2" | "heartRate" | "temperature", value: string) => {
-    await page.getByTestId(`checkpoint-band-${kind}-${checkpoint}`).click();
-    await expect(page.getByTestId("entry-time")).toBeVisible();
-    if (kind === "temperature") {
-      const picker = page.getByRole("combobox", { name: "Temperatur auswählen" });
-      await picker.fill(value);
-      await picker.press("Enter");
-    } else {
-      await page.getByTestId("entry-value").fill(value);
-    }
-    await page.getByTestId("entry-save").click();
-    await expect(warning).toBeVisible();
+  const area = page.getByTestId("timeline-create-area");
+  const clickBand = async (kind: string, yFraction: number) => {
+    const band = page.getByTestId(`band-${kind}`);
+    await band.scrollIntoViewIfNeeded();
+    const [bandBox, areaBox] = await Promise.all([band.boundingBox(), area.boundingBox()]);
+    expect(bandBox).not.toBeNull();
+    expect(areaBox).not.toBeNull();
+    await page.mouse.click(areaBox!.x + areaBox!.width * 0.12, bandBox!.y + bandBox!.height * yFraction);
   };
 
-  await addAtCheckpoint("spo2", "98");
-  await addAtCheckpoint("heartRate", "70");
-  await addAtCheckpoint("temperature", "36,7");
-  await page.getByTestId(`checkpoint-band-nibp-${checkpoint}`).click();
-  await page.getByTestId("entry-mean").fill("90");
-  await page.getByTestId("entry-save").click();
+  // Skalar-Bänder: direkte Y-Eingabe, KEIN Drawer.
+  await clickBand("spo2", 0.4);
+  await expect(page.getByTestId("entry-value")).toHaveCount(0);
   await expect(warning).toBeVisible();
-  await page.getByTestId("nibp-handle-systolic").locator('circle[role="button"]').click();
-  await page.getByTestId("entry-systolic").fill("120");
-  await page.getByTestId("entry-diastolic").fill("70");
-  await page.getByTestId("entry-save").click();
+  await clickBand("heartRate", 0.4);
+  await expect(warning).toBeVisible();
+  await clickBand("temperature", 0.4);
+  await expect(warning).toBeVisible();
+
+  // NIBP: inline drei Komponenten wählen und setzen – kein Drawer, keine Schätzung.
+  await page.getByTestId("nibp-component-mean").click();
+  await clickBand("nibp", 0.5);
+  await expect(warning).toBeVisible();
+  await page.getByTestId("nibp-component-systolic").click();
+  await clickBand("nibp", 0.2);
+  await expect(warning).toBeVisible();
+  await page.getByTestId("nibp-component-diastolic").click();
+  await clickBand("nibp", 0.8);
   await expect(warning).toHaveCount(0);
+
+  // Alle Werte an genau derselben Kontrollzeit; NIBP-Reihenfolge gültig.
+  const persisted = await page.evaluate(() => JSON.parse(localStorage.getItem("sikant-anesthesia-demo-case:v1")!).measurements);
+  expect(new Set(persisted.map((m: { time: number }) => m.time))).toEqual(new Set([checkpoint]));
+  const nibp = persisted.find((m: { kind: string }) => m.kind === "nibp");
+  expect(nibp.systolic).toBeGreaterThan(nibp.mean);
+  expect(nibp.mean).toBeGreaterThan(nibp.diastolic);
 
   const temperaturePoint = page.locator('[data-testid^="point-temperature-"]');
   await expect(temperaturePoint).toHaveCount(1);

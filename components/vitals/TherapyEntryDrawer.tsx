@@ -33,6 +33,7 @@ import {
   TIME_ERROR_MESSAGES,
   validateTimelineTime,
 } from "../../lib/timeline/timeValidation";
+import { resetDrawerScrollTop } from "../../lib/timeline/drawerScroll";
 import { useCaseStore, type NewInfusion, type NewMedication } from "../../store/anesthesiaCaseStore";
 import type {
   MedicationAdministrationType,
@@ -98,6 +99,7 @@ export function TherapyEntryDrawer({ draft, onClose }: Props) {
       destroyOnHidden
       onClose={onClose}
       rootClassName="therapy-entry-drawer"
+      afterOpenChange={(opened) => { if (opened) resetDrawerScrollTop("therapy-entry-drawer"); }}
     >
       {draft && startedAt !== null ? (
         <div className="therapy-form-shell">
