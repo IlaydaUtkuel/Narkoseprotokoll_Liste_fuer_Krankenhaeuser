@@ -1,6 +1,6 @@
 # Agentischer Entwicklungsworkflow
 
-Dieses Dokument beschreibt drei nachvollziehbare Entwicklungs- und Korrekturschleifen des Repositories. Grundlage sind die vorhandene Git-Historie, die aktuelle Implementierung, Tests und konkrete menschliche Rückmeldungen. Es werden keine erfundenen Agentengespräche oder externen Arbeitsschritte behauptet.
+Dieses Dokument beschreibt fünf nachvollziehbare Entwicklungs- und Korrekturschleifen des Repositories. Grundlage sind die vorhandene Git-Historie, die aktuelle Implementierung, Tests und konkrete menschliche Rückmeldungen. Es werden keine erfundenen Agentengespräche oder externen Arbeitsschritte behauptet.
 
 Agentisches Coding unterstützt Analyse, Implementierung und wiederholte Verifikation. Es ersetzt weder die menschliche Produktentscheidung noch die medizinische Bewertung, die reale Hardwareabnahme oder die Freigabe einer Auslieferung.
 
@@ -25,6 +25,12 @@ Die menschliche Rückmeldung verlangte ausdrücklich, dass nach dem Fallende `Sp
 ### Erkannte Schwachstelle
 
 Eine direkte Änderung der Basisdaten oder ein sofortiger Reset hätte die aktive Dokumentation inkonsistent machen können. Außerdem durfte das Schließen eines Directory-Pickers nicht als erfolgreicher Export gelten.
+
+### Verworfen
+
+Verworfen wurde das direkte Durchschreiben jeder Basisdatenänderung in den laufenden Fall. Es hätte eine bereits begonnene Dokumentation ohne Rückfrage einem anderen Patientenkontext zugeordnet; an seine Stelle trat die bestätigungspflichtige Edit-Session.
+
+Ebenfalls verworfen wurde, das bloße Öffnen des Directory-Pickers als Exporterfolg zu werten. Ein abgebrochener Picker hätte damit den aktiven Fall archiviert und gelöscht. Stattdessen aktualisiert erst ein tatsächlich geschriebener Datei- oder Freigabeweg `lastSuccessfullyExportedRevision`.
 
 ### Korrektur
 
@@ -60,6 +66,12 @@ Die visuelle Prüfung zeigte eine überlagernde zweite braune Tooltip-Fläche, e
 
 Zwei gleichzeitig sichtbare Erklärflächen verdeckten Werte und Zeitlinien. Ein kleines Warnzeichen war unter Zeitdruck schwer zu erfassen. Ohne Altersnotiz war die Grundlage der automatisch gewählten Altersgruppe nicht transparent.
 
+### Verworfen
+
+Verworfen wurde die zusätzliche braune Warn-Tooltipfläche neben der bereits vorhandenen kompakten grauen Werteanzeige. Zwei konkurrierende Erklärflächen verdeckten Messwerte und Zeitlinien; die Erklärung liegt seither im zugänglichen Namen, im `title` des Warnbuttons und im vorhandenen Wertehinweis.
+
+Verworfen wurde außerdem, die Thresholds in das Fallmodell und damit in den Export aufzunehmen. Sie sind UI-Konfiguration und keine dokumentierte Messung; sie liegen in einem eigenen, fallbezogenen localStorage-Schlüssel.
+
 ### Korrektur
 
 Die konkurrierende braune Warnfläche wurde entfernt. Das Symbol verwendet jetzt ein deutliches Warnzeichen in einem kontrastreichen, fokussierbaren Ziel. Die vollständige Erklärung bleibt im zugänglichen Namen beziehungsweise im vorhandenen kompakten Wertehinweis. `Kritische Werte` zeigt das aus dem Geburtsdatum berechnete Alter als Information. Die 46×46-SVG-Fläche kompensiert Rundungsabweichungen der ViewBox und bleibt visuell zurückhaltend.
@@ -94,17 +106,97 @@ Die Rückmeldung bestätigte die Platzierung im Ereignisbereich, verlangte aber 
 
 Automatisches Deaktivieren nach der ersten Platzierung verhinderte mehrere gleichartige Ereignisse. Eine nicht eindeutig gekoppelte visuelle und interne Auswahl führte zu der Meldung, zuerst ein Symbol auszuwählen.
 
+### Verworfen
+
+Verworfen wurde das automatische Abwählen des Ereigniswerkzeugs nach jeder Platzierung. Mehrere gleichartige Ereignisse hätten damit jeweils eine erneute Auswahl erfordert; das Werkzeug bleibt jetzt bis zum bewussten Abwählen oder `Escape` aktiv.
+
+Verworfen wurde ebenso ein zweiter, nur visueller Auswahlzustand neben dem internen State. Er war die Ursache der Meldung „Bitte zuerst links ein Ereignissymbol auswählen“ trotz optisch aktiver Schaltfläche; Darstellung, `aria-pressed` und Platzierungslogik lesen seither denselben `selectedEventType`.
+
 ### Korrektur
 
 Die Auswahl wird über einen einzigen `selectedEventType` geführt. Derselbe Button schaltet sie aus, ein anderer Button ersetzt sie, `Escape` beendet sie, und die Platzierung selbst lässt sie aktiv. `aria-pressed` spiegelt denselben State. Extra-Kommentare erscheinen per Hover und Fokus, sind editier- und löschbar und werden über Migration und Reload erhalten. Die Werkzeugleiste besitzt große Ziele und bleibt im linken Bereich ihrer Lane.
 
 ### Automatisierte Verifikation
 
-`tests/unit/timeline/eventSelection.test.ts`, `tests/unit/timeline/events.test.ts`, `tests/unit/timeline/persistence.test.ts` und `e2e/vital-timeline.spec.ts` prüfen Toggle, Mehrfachplatzierung, Escape, Kommentar-CRUD, Migration und Reload. Die Desktop- und iPad-Viewport-Projekte prüfen Maus und Touch; `e2e/accessibility.spec.ts` ergänzt Tastatur, Fokus und Pen-Events.
+`tests/unit/timeline/eventSelection.test.ts`, `tests/unit/timeline/caseStore.test.ts`, `tests/unit/timeline/persistence.test.ts` und `e2e/vital-timeline.spec.ts` prüfen Toggle, Mehrfachplatzierung, Escape, Kommentar-CRUD, Migration und Reload. Die Desktop- und iPad-Viewport-Projekte prüfen Maus und Touch; `e2e/accessibility.spec.ts` ergänzt Tastatur, Fokus und Pen-Events.
 
 ### Ergebnis
 
 `Extra` ist ein vollwertiger, migrationssicherer Ereignistyp. Auswahlzustand, visuelle Darstellung und zugänglicher Zustand stimmen überein; derselbe Ereignistyp kann kontrolliert mehrfach dokumentiert werden.
+
+## Loop 4 – Playwright-Demoablauf und Videoaufzeichnung
+
+### Ausgangsproblem
+
+Für die Abgabe fehlte eine durchgehende, reproduzierbare Aufzeichnung des Hauptablaufs. Ein erster Durchlauf erzeugte zwar ein Video, dokumentierte die Vitalwerte aber, indem der Test die Zahlen direkt in die Formularfelder tippte. Das zeigte die eigentliche Bedienung der Zeitachse gerade nicht.
+
+### Anforderung
+
+Ein einzelner Test soll den kompletten Ablauf von den Basisdaten bis zur Kontrollseite zeigen, dabei jeden Vitalwert ausschließlich über die Grafik erzeugen, den Mauszeiger sichtbar machen und trotzdem mit echten Assertions arbeiten. Die Uhr muss fixiert sein, damit die Zeitachse in jedem Lauf bei 10:00:00 beginnt.
+
+### Agentischer Umsetzungsschritt
+
+Der Test liest die Koordinatenanzeige der Anwendung (`crosshair-coordinate`) als Quelle der Wahrheit: Zwei Messfahrten im Band ergeben die Zuordnung von Bildschirmhöhe zu Wert, danach wird die Zielhöhe angefahren und genau der dort angezeigte Wert angeklickt. Gespeicherter Wert und angezeigter Wert werden gegeneinander geprüft. Die Uhr wird über `page.clock.install` gesetzt und mit `pauseAt`/`resume` weitergeschaltet. Ein per `addInitScript` eingefügtes Overlay macht den Zeiger im Video sichtbar.
+
+### Menschliche Prüfung
+
+Die Rückmeldung verlangte ausdrücklich, dass Werte nicht getippt, sondern geklickt und gezogen werden, dass der Zeiger deutlich sichtbar ist, dass Systolisch und Diastolisch gezogen werden, dass der Kontrollzeit-Modus einschließlich Aus- und Wiedereinschalten vorkommt, dass die Medikamenteninformation in den übrigen Bändern erscheint und dass am Ende die Kontrollseite langsam durchgescrollt wird.
+
+### Erkannte Schwachstelle
+
+Drei reproduzierbare Fehlerbilder traten im Testlauf auf. Eine zu kurze Ziehbewegung am NIBP-Griff wurde von der Anwendung korrekt als Tippen gewertet und öffnete das Bearbeitungsformular; dadurch blieb das Fadenkreuz stehen und wirkte eingefroren, weil die Anwendung bei geöffnetem Drawer bewusst keine Hover-Koordinate mehr aktualisiert. Im Kontrollzeit-Modus schlug die Kalibrierung über Hover fehl, weil die Koordinate dort nur bei gedrücktem Zeiger erscheint. Zusätzlich lieferte die Intervall-Linie einer Infusion `toBeVisible() === false`, da eine SVG-Linie ohne Höhe keine Trefferfläche besitzt.
+
+### Verworfen
+
+Verworfen wurde der ursprüngliche Testansatz, Vitalwerte über `fill()` in die Formularfelder zu schreiben. Er hätte im Video eine Bedienung gezeigt, die es so nicht gibt; die Werte entstehen jetzt aus der Zeigerposition, und der Test behauptet nur noch, dass der gespeicherte Wert dem angezeigten entspricht.
+
+Verworfen wurde die einfache Ziehbewegung „von der Startposition direkt zur Zielhöhe“. Liegt das Ziel nah an der Startposition, unterschreitet sie die Bewegungsschwelle und gilt als Tippen. Stattdessen fährt jede Ziehbewegung zuerst einen Ausschlag deutlich über der Schwelle und danach die Zielhöhe an.
+
+Verworfen wurde die Hover-Kalibrierung im Kontrollzeit-Modus. Sie wurde durch eine Kalibrierung innerhalb derselben gedrückten Geste ersetzt, die zusätzlich dem tatsächlichen Bedienmodell entspricht.
+
+Verworfen wurde die Sichtbarkeitsprüfung der Therapie-Intervalllinie über `toBeVisible()`; geprüft wird stattdessen ihre Geometrie.
+
+Das zuvor erzeugte Video wurde vor der Neuaufnahme gelöscht, damit keine veraltete Aufzeichnung mit getippten Werten in die Abgabe gerät.
+
+### Automatisierte Verifikation
+
+`e2e-demo/narkoseprotokoll-demo.spec.ts` läuft über `npm run test:e2e:demo-video` mit einer eigenen Konfiguration (`playwright.demo.config.ts`, ein Chromium-Projekt, `workers: 1`, `retries: 0`, `video: "on"`). Der Test prüft unter anderem, dass im Kontrollzeit-Modus kein Formular öffnet, dass eine Ziehbewegung kein Formular öffnet, dass das kritische Warnsymbol im DOM vor den Griffen liegt und seinen eigenen Messpunkt nicht überdeckt, und dass der Fall auf der Kontrollseite noch nicht archiviert ist.
+
+### Ergebnis
+
+Ein einzelner Lauf erzeugt eine vollständige Aufzeichnung des Hauptablaufs, in der jeder Vitalwert sichtbar aus einer Zeigerposition entsteht.
+
+## Loop 5 – Leerer Fall ohne Orientierung
+
+### Ausgangsproblem
+
+Ein neuer Fall zeigte die vollständige Zeitachse mit vier leeren Bändern und drei leeren Lanes. Ein dauerhaft eingeblendeter Hinweistext beschrieb zwar das Antippen eines Bandes, aber es fehlte eine Aussage darüber, dass noch überhaupt keine Dokumentation vorliegt.
+
+### Anforderung
+
+Solange weder Messung noch Therapie noch Ereignis existiert, soll ein kurzer deutscher Hinweis den nächsten Schritt benennen. Die Zeitachse muss sichtbar bleiben, der Hinweis mit dem ersten Eintrag verschwinden und nach einem Reload mit vorhandenen Daten nicht wiederkehren.
+
+### Agentischer Umsetzungsschritt
+
+`VitalDocumentation` liest die Summe aus Messungen, Medikamenten, Infusionen und Ereignissen aus dem Fall-Store und zeigt den Hinweis nur, wenn der Store hydratisiert und die Summe null ist.
+
+### Erkannte Schwachstelle
+
+Der Start eines Falls ist noch keine Dokumentation. Würde der Hinweis bereits beim Start verschwinden, bliebe der eigentlich leere Fall unkommentiert.
+
+### Verworfen
+
+Verworfen wurde die Platzierung des Hinweises oberhalb der Zeitachse. Sein Erscheinen und Verschwinden hätte die Bänder vertikal verschoben und damit sowohl die Bedienung als auch die pixelgenauen Messfahrten des Demotests gestört; der Hinweis steht deshalb unterhalb der Grafik.
+
+Verworfen wurde ein größeres Onboarding mit mehreren Schritten. Gefordert war eine knappe Orientierung, kein Tutorial.
+
+### Automatisierte Verifikation
+
+`e2e/vital-timeline.spec.ts` prüft in beiden Playwright-Projekten, dass der Hinweis im leeren Fall sichtbar ist, den Start überlebt, nach dem ersten Vitalwert verschwindet und nach einem Reload mit vorhandener Messung nicht zurückkehrt.
+
+### Ergebnis
+
+Ein leerer Fall benennt den nächsten Schritt, ohne den Hauptablauf oder die Darstellung der Zeitachse zu verändern.
 
 ## Grenzen der agentischen Verifikation
 
