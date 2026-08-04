@@ -5,13 +5,16 @@ import { timeToX, type XScale, type YScale } from "../../lib/timeline/scales";
 import type { CriticalWarning } from "../../lib/timeline/criticalValues";
 import type { Measurement, VitalKind } from "../../types/vitals";
 import { criticalIconRect } from "../../lib/timeline/warningIcons";
+import type { TooltipRect } from "../../lib/timeline/tooltipPlacement";
 
-export function CriticalWarningLayer({ warnings, measurements, layout, xScale, yScales }: {
+export function CriticalWarningLayer({ warnings, measurements, layout, xScale, yScales, iconRects }: {
   warnings: CriticalWarning[];
   measurements: Measurement[];
   layout: TimelineLayout;
   xScale: XScale;
   yScales: Record<VitalKind, YScale>;
+  /** Vorab kollisionsfrei berechnete Position je Warnsymbol (siehe VitalTimeline). */
+  iconRects?: Record<string, TooltipRect>;
 }) {
   return (
     <g data-testid="critical-warning-layer">
@@ -22,7 +25,8 @@ export function CriticalWarningLayer({ warnings, measurements, layout, xScale, y
         const markerX = timeToX(xScale, measurement.time);
         if (markerX < layout.plotLeft || markerX > layout.plotRight) return null;
         const markerY = yScales[measurement.kind](value);
-        const iconRect = criticalIconRect(markerX, markerY, layout.bandByKind[measurement.kind].top, layout.plotRight);
+        const iconRect = iconRects?.[warning.measurementId]
+          ?? criticalIconRect(markerX, markerY, layout.bandByKind[measurement.kind].top, layout.plotRight);
         return (
           <g key={warning.measurementId}>
             <foreignObject x={iconRect.x} y={iconRect.y} width={iconRect.width} height={iconRect.height}>

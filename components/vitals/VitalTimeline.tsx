@@ -20,7 +20,7 @@ import { maxDocumentableTime, type TimelineTimeError } from "../../lib/timeline/
 import { isPreviewConfirmHit, usesTwoPhase, type TimelinePreview } from "../../lib/timeline/previewInteraction";
 import { clampDiastolic, clampMean, clampSystolic } from "../../lib/timeline/nibpDrag";
 import { placeTooltipAvoidingAll, type TooltipRect } from "../../lib/timeline/tooltipPlacement";
-import { checkpointIconRect, criticalIconRect } from "../../lib/timeline/warningIcons";
+import { checkpointIconRect, occupiedSpot, placeCriticalIcon } from "../../lib/timeline/warningIcons";
 import { eventDefinition } from "../../lib/timeline/events";
 import { useCurrentTime } from "../../hooks/useCurrentTime";
 import { useElementSize } from "../../hooks/useElementSize";
@@ -207,10 +207,26 @@ export function VitalTimeline({ patientBirthDate = "" }: { patientBirthDate?: st
     [criticalSettings, measurements],
   );
 
-  // Reale Bounding-Boxen aller sichtbaren Warn-Ausrufezeichen (kritisch + Checkpoint).
-  // Dieselbe Geometrie wie in den Warn-Ebenen; dient der Tooltip-Kollisionsvermeidung.
-  const warningIconRects = useMemo<TooltipRect[]>(() => {
-    const rects: TooltipRect[] = [];
+  // Position jedes kritischen Warnsymbols. Es weicht allen bedienbaren Messpunkten
+  // und NiBP-Griffen aus, damit es niemals einen Wert unklickbar macht.
+  const criticalIconRects = useMemo<Record<string, TooltipRect>>(() => {
+    const placed: Record<string, TooltipRect> = {};
+    // Alle bedienbaren Stellen je Band einsammeln (Punkte und NiBP-Griffe).
+    const spotsByBand = new Map<VitalKind, TooltipRect[]>();
+    for (const measurement of measurements) {
+      const x = timeToX(xScale, measurement.time);
+      if (x < layout.plotLeft || x > layout.plotRight) continue;
+      const spots = spotsByBand.get(measurement.kind) ?? [];
+      if (measurement.kind === "nibp") {
+        const meanY = yScales.nibp(measurement.mean);
+        spots.push(occupiedSpot(x, meanY));
+        spots.push(occupiedSpot(x, measurement.systolic === null ? meanY - 16 : yScales.nibp(measurement.systolic)));
+        spots.push(occupiedSpot(x, measurement.diastolic === null ? meanY + 16 : yScales.nibp(measurement.diastolic)));
+      } else {
+        spots.push(occupiedSpot(x, yScales[measurement.kind](measurement.value)));
+      }
+      spotsByBand.set(measurement.kind, spots);
+    }
     for (const warning of criticalWarnings) {
       const measurement = measurements.find((item) => item.id === warning.measurementId);
       if (!measurement) continue;
@@ -218,15 +234,27 @@ export function VitalTimeline({ patientBirthDate = "" }: { patientBirthDate?: st
       const markerX = timeToX(xScale, measurement.time);
       if (markerX < layout.plotLeft || markerX > layout.plotRight) continue;
       const markerY = yScales[measurement.kind](value);
-      rects.push(criticalIconRect(markerX, markerY, layout.bandByKind[measurement.kind].top, layout.plotRight));
+      const band = layout.bandByKind[measurement.kind];
+      placed[warning.measurementId] = placeCriticalIcon(
+        { x: markerX, y: markerY },
+        spotsByBand.get(measurement.kind) ?? [],
+        { left: layout.plotLeft, top: band.top + 2, right: layout.plotRight, bottom: band.bottom - 2 },
+      );
     }
+    return placed;
+  }, [criticalWarnings, measurements, xScale, yScales, layout]);
+
+  // Reale Bounding-Boxen aller sichtbaren Warn-Ausrufezeichen (kritisch + Checkpoint).
+  // Dieselbe Geometrie wie in den Warn-Ebenen; dient der Tooltip-Kollisionsvermeidung.
+  const warningIconRects = useMemo<TooltipRect[]>(() => {
+    const rects: TooltipRect[] = Object.values(criticalIconRects);
     for (const warning of checkpointWarnings) {
       const x = timeToX(xScale, warning.time);
       if (x < layout.plotLeft || x > layout.plotRight) continue;
       rects.push(checkpointIconRect(x, layout.plotBottom));
     }
     return rects;
-  }, [criticalWarnings, checkpointWarnings, measurements, xScale, yScales, layout]);
+  }, [criticalIconRects, checkpointWarnings, xScale, layout]);
 
   // §11.F.10: Ist der aktive Checkpoint vollständig dokumentiert (kein Warnhinweis
   // mehr), schließt der Checkpoint-Modus sicher von selbst.
@@ -951,7 +979,7 @@ export function VitalTimeline({ patientBirthDate = "" }: { patientBirthDate?: st
   // platziert – in dieser Reihenfolge, damit die Koordinate immer am Zeiger bleibt.
   const crosshairTip = crosshair ? crosshairTooltipRect(crosshair, layout, warningIconRects) : null;
   // Warnhinweis der Zeit unter dem Zeiger (Kontrollzeit und/oder kritischer Wert).
-  const warningInfo = crosshair ? warningInfoAt(crosshair, checkpointWarnings, criticalWarnings, measurements, xScale, yScales, layout) : null;
+  const warningInfo = crosshair ? warningInfoAt(crosshair, checkpointWarnings, criticalWarnings, measurements, xScale, yScales, criticalIconRects) : null;
   const warningTip = warningInfo
     ? placeTooltipAvoidingAll(
         { x: crosshair!.svgX, y: crosshair!.svgY },
@@ -1092,18 +1120,21 @@ export function VitalTimeline({ patientBirthDate = "" }: { patientBirthDate?: st
                     onSelect={(component) => setActiveCheckpoint((current) => (current ? { ...current, nibpComponent: component } : current))}
                   />
                 ) : null}
-                <NibpHandleLayer
-                  measurements={nibps}
-                  ctx={ctx}
-                  onUpdate={updateNibp}
-                  onEdit={(measurement, part) => openEdit(measurement, part)}
-                />
+                {/* Warnsymbole liegen UNTER den Griffen/Punkten: sie duerfen das
+                    Antippen eines Messwerts (z. B. Systolisch) nie blockieren. */}
                 <CriticalWarningLayer
                   warnings={criticalWarnings}
                   measurements={measurements}
                   layout={layout}
                   xScale={xScale}
                   yScales={yScales}
+                  iconRects={criticalIconRects}
+                />
+                <NibpHandleLayer
+                  measurements={nibps}
+                  ctx={ctx}
+                  onUpdate={updateNibp}
+                  onEdit={(measurement, part) => openEdit(measurement, part)}
                 />
                 <TherapyMarkerLayer
                   layout={layout}
@@ -1199,7 +1230,7 @@ function warningInfoAt(
   measurements: Measurement[],
   xScale: BandContext["xScale"],
   yScales: BandContext["yScales"],
-  layout: BandContext["layout"],
+  iconRects: Record<string, TooltipRect>,
 ): { lines: string[] } | null {
   const lines: string[] = [];
   const nearCheckpoint = checkpointWarnings.find(
@@ -1217,8 +1248,9 @@ function warningInfoAt(
     const markerX = timeToX(xScale, measurement.time);
     const markerY = yScales[measurement.kind](measurement.kind === "nibp" ? measurement.mean : measurement.value);
     const onMarker = Math.hypot(markerX - crosshair.svgX, markerY - crosshair.svgY) <= CRITICAL_HINT_HIT_PX;
-    const icon = criticalIconRect(markerX, markerY, layout.bandByKind[measurement.kind].top, layout.plotRight);
-    const onIcon = crosshair.svgX >= icon.x && crosshair.svgX <= icon.x + icon.width
+    const icon = iconRects[warning.measurementId];
+    const onIcon = icon !== undefined
+      && crosshair.svgX >= icon.x && crosshair.svgX <= icon.x + icon.width
       && crosshair.svgY >= icon.y && crosshair.svgY <= icon.y + icon.height;
     if (!onMarker && !onIcon) continue;
     lines.push("Kritischer Hinweis:");

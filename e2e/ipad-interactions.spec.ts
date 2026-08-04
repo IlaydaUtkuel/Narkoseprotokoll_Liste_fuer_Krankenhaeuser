@@ -1020,3 +1020,70 @@ test("iPad R5 Story 10: erste Einheit (mL) laesst sich antippen und wird ueberno
   const stored = (await readCase(page)).infusions[0];
   expect(stored.unit.code).toBe("mL");
 });
+
+// R6: Das kritische Warnsymbol darf keinen Messwert-Griff blockieren.
+test("iPad R6: Warnsymbol blockiert die NIBP-Griffe nicht", async ({ page }) => {
+  const startedAt = Date.now() - 20 * 60_000;
+  await page.goto("/dokumentation");
+  await page.evaluate((started) => {
+    localStorage.setItem("sikant-anesthesia-demo-case:v1", JSON.stringify({
+      schemaVersion: 6, caseId: "r6-crit", caseRevision: 1, lastSuccessfullyExportedRevision: null,
+      startedAt: started, endedAt: null,
+      // Kritischer Blutdruck: MAP unter 65 -> Warnsymbol direkt an dieser Messung.
+      measurements: [{ id: "nb", kind: "nibp", time: started + 5 * 60_000, systolic: 85, mean: 60, diastolic: 45, createdAt: started, updatedAt: started }],
+      medications: [], infusions: [], events: [], lastSavedAt: started,
+    }));
+    localStorage.setItem("sikant-critical-values:v1:r6-crit", JSON.stringify({
+      schemaVersion: 1, caseId: "r6-crit", birthDate: "", ageGroup: "adult", source: "custom", ageChangedNotice: false,
+      thresholds: { spo2Lower: 90, mapLower: 65, systolicLower: 90, systolicUpper: 180, diastolicUpper: 120, heartRateLower: 50, heartRateUpper: 150, temperatureLower: 36, temperatureUpper: 38.5, temperatureRiseDelta: 0.5, temperatureRiseWindowMinutes: 15 },
+    }));
+  }, startedAt);
+  await page.reload();
+  const warnIcon = page.locator('[data-testid^="critical-warning-"]:not([data-testid="critical-warning-layer"])');
+  await expect(warnIcon).toHaveCount(1);
+
+  // Das Symbol überlappt keinen der drei Griffe.
+  const boxes = await page.evaluate(() => {
+    const rect = (sel: string) => {
+      const el = document.querySelector(sel);
+      if (!el) return null;
+      const r = el.getBoundingClientRect();
+      return { l: r.left, t: r.top, r: r.right, b: r.bottom };
+    };
+    return {
+      icon: rect('[data-testid^="critical-warning-"]:not([data-testid="critical-warning-layer"])'),
+      sys: rect('[data-testid="nibp-handle-systolic"] circle[role="button"]'),
+      dia: rect('[data-testid="nibp-handle-diastolic"] circle[role="button"]'),
+      mean: rect('[data-testid^="nibp-time-handle-"]'),
+    };
+  });
+  type Box = { l: number; t: number; r: number; b: number };
+  const overlaps = (a: Box, b: Box) => !(a.r <= b.l || b.r <= a.l || a.b <= b.t || b.b <= a.t);
+  for (const handle of [boxes.sys, boxes.dia, boxes.mean]) {
+    expect(handle).not.toBeNull();
+    expect(overlaps(boxes.icon as Box, handle as Box)).toBe(false);
+  }
+
+  // Der Systolisch-Griff ist trotz Warnsymbol wirklich bedienbar.
+  const sys = page.getByTestId("nibp-handle-systolic").locator('circle[role="button"]');
+  await sys.scrollIntoViewIfNeeded();
+  const sysBox = await sys.boundingBox();
+  const x = sysBox!.x + sysBox!.width / 2;
+  const y = sysBox!.y + sysBox!.height / 2;
+  // Das oberste Element an dieser Stelle ist der Griff selbst, nicht das Warnsymbol.
+  const topTestId = await page.evaluate(({ px, py }) => {
+    const el = document.elementFromPoint(px, py);
+    const owner = el?.closest("[data-testid]");
+    return owner?.getAttribute("data-testid") ?? null;
+  }, { px: x, py: y });
+  expect(topTestId).toBe("nibp-handle-systolic");
+
+  await pointer(sys, "down", x, y, "pen", 960);
+  expect(await page.evaluate(() => document.querySelector('[data-testid="nibp-handle-systolic"]')?.getAttribute("data-active"))).toBe("true");
+  await pointer(sys, "move", x, y - 30, "pen", 960);
+  await pointer(sys, "up", x, y - 30, "pen", 960);
+  const stored = (await readCase(page)).measurements[0];
+  expect(stored.systolic).not.toBe(85);
+  expect(stored.mean).toBe(60);
+  expect(stored.diastolic).toBe(45);
+});
