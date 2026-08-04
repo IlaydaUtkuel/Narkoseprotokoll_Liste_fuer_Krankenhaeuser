@@ -16,6 +16,8 @@
 /playwright-report/
 /blob-report/
 /playwright/.cache/
+# Rohausgabe des Demo-Video-Laufs; das ausgelieferte Video liegt in docs/videos/
+/demo-artifacts/
 
 # service worker (wird beim Build erzeugt)
 /public/sw.js

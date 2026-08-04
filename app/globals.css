@@ -837,6 +837,26 @@ body {
   margin: 10px 4px 0;
 }
 
+/* Hinweis fuer einen Fall ohne jeden Eintrag. Bewusst kompakt: kein Onboarding,
+   keine Ueberlagerung der Zeitachse. */
+.timeline-empty-state {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 12px 4px 0;
+  padding: 10px 14px;
+  border: 1px dashed #c3d3cd;
+  border-left: 4px solid #1f7a63;
+  border-radius: 8px;
+  background: #f4f9f7;
+  color: #2f4a42;
+  font-size: 14px;
+}
+
+.timeline-empty-state strong {
+  color: #173029;
+}
+
 /* Sichtbarer Fokus fuer die Messpunkt-Hit-Areas (Tastaturbedienung). */
 .vital-hit:focus-visible {
   outline: 2px solid #1f7a63;

@@ -171,6 +171,32 @@ test("Story 1: Basisdaten -> Okay und Weiter -> Start -> SpO2 -> Reload", async 
   await expect(page.locator('[data-testid="points-spo2"] circle')).toHaveCount(1);
 });
 
+// Leerer Fall: sichtbarer Hinweis, der mit dem ersten Eintrag verschwindet und
+// nach einem Reload mit vorhandenen Daten nicht wiederkehrt.
+test("Leerer Fall zeigt einen Dokumentationshinweis, der nach dem ersten Eintrag verschwindet", async ({ page }) => {
+  await page.goto("/dokumentation");
+  const emptyState = page.getByTestId("timeline-empty-state");
+  await expect(emptyState).toBeVisible();
+  await expect(emptyState).toContainText("Noch keine Dokumentation vorhanden.");
+  await expect(emptyState).toContainText(
+    "Wählen Sie einen Vitalwert, ein Medikament, eine Infusion oder ein Ereignis aus, um mit der Dokumentation zu beginnen.",
+  );
+  // Die Zeitachse bleibt trotz Hinweis vollstaendig sichtbar.
+  await expect(page.getByTestId("vital-timeline-svg")).toBeVisible();
+
+  // Der reine Start des Falls ist noch keine Dokumentation.
+  await startCase(page);
+  await expect(emptyState).toBeVisible();
+
+  await addScalar(page, "spo2", 96);
+  await expect(emptyState).toHaveCount(0);
+
+  await page.reload();
+  await expect(page.getByTestId("case-started")).toBeVisible();
+  await expect(page.locator('[data-testid="points-spo2"] circle')).toHaveCount(1);
+  await expect(page.getByTestId("timeline-empty-state")).toHaveCount(0);
+});
+
 // Story 2: vier Vitalparameter auf gemeinsamer X-Achse + Farb-Tokens.
 test("Story 2: vier Parameter, gemeinsame Zeitachse, korrekte Farben", async ({ page }) => {
   await page.goto("/dokumentation");

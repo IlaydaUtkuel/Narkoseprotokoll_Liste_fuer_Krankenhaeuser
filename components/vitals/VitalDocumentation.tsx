@@ -15,6 +15,11 @@ export function VitalDocumentation() {
   const hydrated = useCaseStore((s) => s.hydrated);
   const loadError = useCaseStore((s) => s.loadError);
   const resetCase = useCaseStore((s) => s.resetCase);
+  // Ein Fall gilt als dokumentiert, sobald irgendein Eintrag existiert – der
+  // reine Start des Falls ist noch keine Dokumentation.
+  const hasDocumentation = useCaseStore(
+    (s) => s.measurements.length + s.medications.length + s.infusions.length + s.events.length > 0,
+  );
   const [patient, setPatient] = useState<PatientBaseData | null>(null);
 
   useEffect(() => {
@@ -45,6 +50,18 @@ export function VitalDocumentation() {
     <div className="doc-container">
       <CaseHeader patient={patient} />
       <VitalTimeline patientBirthDate={patient?.birthDate ?? ""} />
+      {/* Leerer Fall: kurzer Hinweis unterhalb der Grafik. Die Zeitachse bleibt
+          vollstaendig sichtbar und die Position der Baender veraendert sich nicht,
+          wenn der Hinweis mit dem ersten Eintrag verschwindet. */}
+      {hydrated && !hasDocumentation ? (
+        <div className="timeline-empty-state" role="status" data-testid="timeline-empty-state">
+          <strong>Noch keine Dokumentation vorhanden.</strong>
+          <span>
+            Wählen Sie einen Vitalwert, ein Medikament, eine Infusion oder ein Ereignis aus, um mit
+            der Dokumentation zu beginnen.
+          </span>
+        </div>
+      ) : null}
       <p className="timeline-hint">
         Tippen Sie in ein Band, um einen Wert zu dokumentieren. Bestehende Punkte lassen sich
         antippen (bearbeiten) oder ziehen (Wert anpassen).
