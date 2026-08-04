@@ -626,6 +626,14 @@ body {
   stroke-dasharray: 2 1;
 }
 
+/* Aktiver (angefasster) Griff ist schwarz – nur dieser laesst sich ziehen.
+   Alle nicht aktiven Griffe bleiben weiss. Nach dem Loslassen wieder weiss. */
+.nibp-handle--active {
+  fill: #000000;
+  stroke: #000000;
+  stroke-dasharray: none;
+}
+
 .nibp-mean-drag-preview {
   fill: var(--vital-nibp-dark);
   stroke: #ffffff;
@@ -689,6 +697,18 @@ body {
   fill: #ffd591;
   font-size: 10px;
   font-weight: 600;
+}
+
+/* Bedeutung der Warnung an der Zeigerposition – zusammen mit Koordinate und
+   Therapie-Info lesbar, kollisionsfrei platziert. */
+.warning-info-box {
+  fill: rgba(91, 9, 18, 0.96);
+}
+
+.warning-info-text {
+  fill: #ffffff;
+  font-size: 10px;
+  font-weight: 700;
 }
 
 .checkpoint-warning-line {

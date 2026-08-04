@@ -61,12 +61,23 @@ export function therapyIntervalsAtTime(
   });
 }
 
+// Größe der Therapie-Box – damit der Aufrufer die Platzierung gemeinsam mit den
+// anderen Boxen (Koordinate, Warnhinweis) kollisionsfrei berechnen kann.
+export function therapyTooltipSize(itemCount: number): { width: number; height: number } {
+  return { width: 308, height: 12 + itemCount * 102 };
+}
+
+export function therapyTooltipBounds(layout: TimelineLayout) {
+  return { left: layout.plotLeft + 3, top: layout.plotTop + 3, right: layout.plotRight - 3, bottom: layout.plotBottom - 3 };
+}
+
 export function TherapyIntervalTooltip({
   items,
   x,
   y,
   layout,
   avoidRects = [],
+  placedRect,
 }: {
   items: ActiveTherapyInterval[];
   x: number;
@@ -74,14 +85,15 @@ export function TherapyIntervalTooltip({
   layout: TimelineLayout;
   // Zu meidende Boxen: Koordinaten-Tooltip UND Warn-Ausrufezeichen.
   avoidRects?: TooltipRect[];
+  // Optional bereits vom Aufrufer berechnete Position (gemeinsame Kollisionslösung).
+  placedRect?: TooltipRect | null;
 }) {
   if (items.length === 0) return null;
-  const width = 308;
-  const height = 12 + items.length * 102;
-  const placed = placeTooltipAvoidingAll(
+  const { width, height } = therapyTooltipSize(items.length);
+  const placed = placedRect ?? placeTooltipAvoidingAll(
     { x, y },
     { width, height },
-    { left: layout.plotLeft + 3, top: layout.plotTop + 3, right: layout.plotRight - 3, bottom: layout.plotBottom - 3 },
+    therapyTooltipBounds(layout),
     avoidRects,
   );
   return (
@@ -215,7 +227,8 @@ export function TherapyMarkerLayer({
   onEditEvent,
   onCommitEventTime,
   selectedEnd,
-  onSelectEnd,
+  onFinishNow,
+  onBeginEndDrag,
   onPreviewEnd,
   onCommitEnd,
   onCancelEnd,
@@ -235,7 +248,10 @@ export function TherapyMarkerLayer({
   onEditEvent: (entry: TimelineEvent) => void;
   onCommitEventTime: (id: string, time: number) => void;
   selectedEnd: TherapyEndPlacement | null;
-  onSelectEnd: (kind: "medication" | "infusion", entry: MedicationEntry | InfusionEntry) => void;
+  // "Anwendung beenden": beendet sofort zur aktuellen Zeit (kein Platzierungsmodus).
+  onFinishNow: (kind: "medication" | "infusion", entry: MedicationEntry | InfusionEntry) => void;
+  // Nur ein gezielter Drag am Endgriff startet eine Endzeit-Vorschau.
+  onBeginEndDrag: (kind: "medication" | "infusion", entry: MedicationEntry | InfusionEntry) => void;
   onPreviewEnd: (time: number) => void;
   onCommitEnd: (time: number) => void;
   onCancelEnd: () => void;
@@ -264,7 +280,8 @@ export function TherapyMarkerLayer({
           maxTime={maxTime}
           getSvgRect={getSvgRect}
           selectedEnd={selectedEnd?.kind === "medication" && selectedEnd.id === entry.id ? selectedEnd : null}
-          onSelectEnd={() => onSelectEnd("medication", entry)}
+          onFinishNow={() => onFinishNow("medication", entry)}
+          onBeginEndDrag={() => onBeginEndDrag("medication", entry)}
           onPreviewEnd={onPreviewEnd}
           onCommitEnd={onCommitEnd}
           onCancelEnd={onCancelEnd}
@@ -289,7 +306,8 @@ export function TherapyMarkerLayer({
           maxTime={maxTime}
           getSvgRect={getSvgRect}
           selectedEnd={selectedEnd?.kind === "infusion" && selectedEnd.id === entry.id ? selectedEnd : null}
-          onSelectEnd={() => onSelectEnd("infusion", entry)}
+          onFinishNow={() => onFinishNow("infusion", entry)}
+          onBeginEndDrag={() => onBeginEndDrag("infusion", entry)}
           onPreviewEnd={onPreviewEnd}
           onCommitEnd={onCommitEnd}
           onCancelEnd={onCancelEnd}
@@ -333,7 +351,8 @@ function TherapyMarker({
   maxTime,
   getSvgRect,
   selectedEnd,
-  onSelectEnd,
+  onFinishNow,
+  onBeginEndDrag,
   onPreviewEnd,
   onCommitEnd,
   onCancelEnd,
@@ -354,7 +373,8 @@ function TherapyMarker({
   maxTime: number;
   getSvgRect: () => DOMRect | null;
   selectedEnd: TherapyEndPlacement | null;
-  onSelectEnd: () => void;
+  onFinishNow: () => void;
+  onBeginEndDrag: () => void;
   onPreviewEnd: (time: number) => void;
   onCommitEnd: (time: number) => void;
   onCancelEnd: () => void;
@@ -376,12 +396,14 @@ function TherapyMarker({
     onPreviewEnd(mapped);
     return mapped;
   };
+  // Nur ein gezielter Drag am Endgriff verändert die Endzeit. Ein reiner Tap
+  // startet KEINEN Platzierungsmodus mehr – dadurch kann eine spätere Berührung
+  // an anderer Stelle den gesetzten Endmarker nicht mehr verschieben (§5).
   const endGesture = usePointerGesture({
     capture: true,
     threshold: 7,
-    onTap: () => onSelectEnd(),
     onDragStart: (event) => {
-      onSelectEnd();
+      onBeginEndDrag();
       mapEnd(event.clientX);
     },
     onDragMove: (event) => mapEnd(event.clientX),
@@ -397,7 +419,7 @@ function TherapyMarker({
   const adjustKeyboard = (deltaMinutes: number) => {
     const base = selectedEnd?.previewTime ?? explicitEnd ?? maxTime;
     const next = clampValue(base + deltaMinutes * 60_000, entry.startedAt + 1_000, maxTime);
-    if (!selectedEnd) onSelectEnd();
+    if (!selectedEnd) onBeginEndDrag();
     onPreviewEnd(next);
   };
   return (
@@ -436,11 +458,11 @@ function TherapyMarker({
           aria-label={`Anwendung ${entry.name} beenden`}
           className="therapy-stop-action"
           data-testid={`${testId}-stop-action`}
-          onClick={(event) => { event.stopPropagation(); onSelectEnd(); }}
+          onClick={(event) => { event.stopPropagation(); onFinishNow(); }}
           onKeyDown={(event) => {
             if (event.key === "Enter" || event.key === " ") {
               event.preventDefault();
-              onSelectEnd();
+              onFinishNow();
             }
           }}
         >
@@ -461,10 +483,6 @@ function TherapyMarker({
             className={`therapy-end-handle ${selectedEnd ? "therapy-end-handle--selected" : ""}`}
             data-testid={`${testId}-end-hit`}
             style={{ touchAction: "none", cursor: "ew-resize" }}
-            onClick={(event) => {
-              event.stopPropagation();
-              if (!selectedEnd) onSelectEnd();
-            }}
             onKeyDown={(event) => {
               if (event.key === "Escape") {
                 event.preventDefault();
@@ -480,7 +498,6 @@ function TherapyMarker({
               if (event.key === "Enter" || event.key === " ") {
                 event.preventDefault();
                 if (selectedEnd) onCommitEnd(selectedEnd.previewTime);
-                else onSelectEnd();
               }
             }}
             {...endGesture}

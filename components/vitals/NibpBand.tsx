@@ -33,6 +33,8 @@ interface HandleLayerProps extends Props {
 }
 
 type NibpPart = "systolic" | "diastolic";
+// Alle drei Griffe der Messung; genau einer kann aktiv (schwarz, ziehbar) sein.
+type NibpHandleKey = NibpPart | "mean";
 
 const UNSET_HANDLE_OFFSET = 16;
 
@@ -120,6 +122,10 @@ function NibpHandles({
   onEdit: HandleLayerProps["onEdit"];
 }) {
   const [preview, setPreview] = useState<{ part: NibpPart; value: number } | null>(null);
+  // Genau ein Griff ist waehrend eines Pointer-Kontakts aktiv. Der aktive Griff wird
+  // schwarz dargestellt und ist der einzige ziehbare; die anderen bleiben weiss und
+  // nehmen keine Pointer-Events an. Wird bei up/cancel/lostpointercapture geleert.
+  const [activeHandle, setActiveHandle] = useState<NibpHandleKey | null>(null);
   const [meanPreview, setMeanPreview] = useState<{ mode: "time" | "mean"; time: number; mean: number } | null>(null);
   const meanPreviewRef = useRef<typeof meanPreview>(null);
   const meanDrag = useRef({ active: false, pointerId: -1, startX: 0, startY: 0, mode: null as "time" | "mean" | null });
@@ -230,6 +236,11 @@ function NibpHandles({
         cy={ySys}
         radius={rSys}
         configured={shownSystolic !== null}
+        isActive={activeHandle === "systolic"}
+        // Solange ein anderer Griff aktiv ist, nimmt dieser keine Pointer-Events an.
+        disabled={activeHandle !== null && activeHandle !== "systolic"}
+        onActivate={() => setActiveHandle("systolic")}
+        onRelease={() => setActiveHandle(null)}
         onDragStart={(event) => { dragSnapshot.current = snapshot(); previewFromPointer("systolic", event); }}
         onPreview={(event) => previewFromPointer("systolic", event)}
         onCommit={() => commit("systolic")}
@@ -242,6 +253,10 @@ function NibpHandles({
         cy={yDia}
         radius={rDia}
         configured={shownDiastolic !== null}
+        isActive={activeHandle === "diastolic"}
+        disabled={activeHandle !== null && activeHandle !== "diastolic"}
+        onActivate={() => setActiveHandle("diastolic")}
+        onRelease={() => setActiveHandle(null)}
         onDragStart={(event) => { dragSnapshot.current = snapshot(); previewFromPointer("diastolic", event); }}
         onPreview={(event) => previewFromPointer("diastolic", event)}
         onCommit={() => commit("diastolic")}
@@ -257,23 +272,27 @@ function NibpHandles({
         tabIndex={0}
         aria-label="Mittelwert bearbeiten oder horizontal in der Zeit verschieben"
         data-testid={`nibp-time-handle-${measurement.id}`}
+        // Solange Systolisch oder Diastolisch aktiv ist, bleibt der Mittelgriff inaktiv.
+        pointerEvents={activeHandle !== null && activeHandle !== "mean" ? "none" : undefined}
         style={{ touchAction: "none", cursor: meanPreview?.mode === "time" ? "ew-resize" : "move" }}
         onPointerDown={(event) => {
           if (event.pointerType === "mouse" && event.button !== 0) return;
           meanDrag.current = { active: true, pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, mode: null };
           dragSnapshot.current = snapshot();
           try { event.currentTarget.setPointerCapture(event.pointerId); } catch { /* ignore */ }
+          setActiveHandle("mean");
           setActive(true);
         }}
         onPointerMove={updateMeanPreview}
-        onPointerUp={finishMeanDrag}
-        onLostPointerCapture={finishMeanDrag}
+        onPointerUp={(event) => { finishMeanDrag(event); setActiveHandle(null); }}
+        onLostPointerCapture={(event) => { finishMeanDrag(event); setActiveHandle(null); }}
         onPointerCancel={(event) => {
           if (meanDrag.current.pointerId !== event.pointerId) return;
           meanDrag.current = { active: false, pointerId: -1, startX: 0, startY: 0, mode: null };
           meanPreviewRef.current = null;
           dragSnapshot.current = null;
           setMeanPreview(null);
+          setActiveHandle(null);
           setActive(false);
         }}
         onKeyDown={(event) => {
@@ -283,6 +302,10 @@ function NibpHandles({
           }
         }}
       />
+      {/* Sichtbarer schwarzer Zustand des aktiven Mittelgriffs. */}
+      {activeHandle === "mean" ? (
+        <circle cx={cx} cy={yMean} r={6} className="nibp-handle nibp-handle--active" data-testid={`nibp-mean-active-${measurement.id}`} pointerEvents="none" />
+      ) : null}
       {meanPreview ? <circle cx={cx} cy={yScale(shownMean)} r={6} className="nibp-mean-drag-preview" pointerEvents="none" /> : null}
       {active || preview ? (
         <g pointerEvents="none" data-testid={`nibp-values-${measurement.id}`}>
@@ -314,6 +337,10 @@ function NibpHandle({
   cy,
   radius,
   configured,
+  isActive,
+  disabled,
+  onActivate,
+  onRelease,
   onDragStart,
   onPreview,
   onCommit,
@@ -325,6 +352,10 @@ function NibpHandle({
   cy: number;
   radius: number;
   configured: boolean;
+  isActive: boolean;
+  disabled: boolean;
+  onActivate: () => void;
+  onRelease: () => void;
   onDragStart: (event: ReactPointerEvent<Element>) => void;
   onPreview: (event: ReactPointerEvent<Element>) => void;
   onCommit: () => void;
@@ -342,7 +373,7 @@ function NibpHandle({
   });
   const label = part === "systolic" ? "Systolisch" : "Diastolisch";
   return (
-    <g data-testid={`nibp-handle-${part}`}>
+    <g data-testid={`nibp-handle-${part}`} data-active={isActive ? "true" : "false"}>
       <circle
         cx={cx}
         cy={cy}
@@ -351,6 +382,10 @@ function NibpHandle({
         role="button"
         tabIndex={0}
         aria-label={`${label} bearbeiten oder ziehen`}
+        aria-pressed={isActive}
+        // Nur der aktive Griff nimmt Pointer-Events an; ein anderer aktiver Griff
+        // kann waehrend seines Drags nicht versehentlich gewechselt werden.
+        pointerEvents={disabled ? "none" : undefined}
         style={{ touchAction: "none", cursor: "ns-resize" }}
         onKeyDown={(event) => {
           if (event.key === "Enter" || event.key === " ") {
@@ -359,8 +394,31 @@ function NibpHandle({
           }
         }}
         {...gesture}
+        onPointerDown={(event) => {
+          if (event.pointerType === "mouse" && event.button !== 0) return;
+          onActivate();
+          gesture.onPointerDown(event);
+        }}
+        onPointerUp={(event) => {
+          gesture.onPointerUp(event);
+          onRelease();
+        }}
+        onPointerCancel={(event) => {
+          gesture.onPointerCancel(event);
+          onRelease();
+        }}
+        onLostPointerCapture={(event) => {
+          gesture.onLostPointerCapture(event);
+          onRelease();
+        }}
       />
-      <circle cx={cx} cy={cy} r={4.5} className={`nibp-handle ${configured ? "" : "nibp-handle--unset"}`} pointerEvents="none" />
+      <circle
+        cx={cx}
+        cy={cy}
+        r={isActive ? 5.5 : 4.5}
+        className={`nibp-handle ${configured ? "" : "nibp-handle--unset"} ${isActive ? "nibp-handle--active" : ""}`}
+        pointerEvents="none"
+      />
     </g>
   );
 }

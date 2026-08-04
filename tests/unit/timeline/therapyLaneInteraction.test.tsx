@@ -29,8 +29,6 @@ function setup() {
         onPlaceEvent={vi.fn()}
         onInvalid={vi.fn()}
         onMissingEvent={vi.fn()}
-        activeEndPlacement={false}
-        onPlaceTherapyEnd={vi.fn()}
         onTwoPhaseTap={vi.fn()}
       />
     </svg>,

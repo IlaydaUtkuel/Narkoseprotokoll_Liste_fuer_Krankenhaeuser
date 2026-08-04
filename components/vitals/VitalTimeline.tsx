@@ -12,7 +12,7 @@ import { mapPointerToTimeline, type PointerMapResult } from "../../lib/timeline/
 import { clampValue, normalizeVitalPointerValue, roundToPrecision } from "../../lib/timeline/measurementUtils";
 import { formatClock, formatVitalNumber } from "../../lib/timeline/format";
 import { computeVitalScaleDomains } from "../../lib/timeline/dynamicYScale";
-import { deriveCheckpointWarnings } from "../../lib/timeline/checkpoints";
+import { checkpointTooltip, deriveCheckpointWarnings } from "../../lib/timeline/checkpoints";
 import { deriveCriticalWarnings } from "../../lib/timeline/criticalValues";
 import { loadCriticalSettings, type CriticalSettings } from "../../lib/timeline/criticalSettingsStorage";
 import { toggleEventSelection } from "../../lib/timeline/eventSelection";
@@ -45,6 +45,8 @@ import {
   TherapyLaneBackgrounds,
   TherapyMarkerLayer,
   therapyIntervalsAtTime,
+  therapyTooltipBounds,
+  therapyTooltipSize,
   type ActiveTherapyInterval,
   type TherapyEndPlacement,
 } from "./TherapyLayers";
@@ -453,7 +455,21 @@ export function VitalTimeline({ patientBirthDate = "" }: { patientBirthDate?: st
     }
   };
 
-  const selectTherapyEnd = (
+  // "Anwendung beenden": beendet die laufende Therapie SOFORT zur aktuellen Zeit.
+  // Der Endmarker steht damit fest; spätere Berührungen an anderer Stelle in den
+  // Lanes verschieben ihn nicht mehr (§5). Nur ein gezielter Drag am Endgriff ändert ihn.
+  const finishTherapyNow = (
+    kind: "medication" | "infusion",
+    entry: MedicationEntry | InfusionEntry,
+  ) => {
+    const time = maxDocumentableTime(nowValue, endedAt);
+    if (updateTherapyEnd(kind, entry.id, time)) message.success("Anwendung beendet.");
+    else message.error("Das Ende muss nach dem Beginn liegen.");
+  };
+
+  // Beginnt einen gezielten Drag am Endgriff. Diese Vorschau ist rein lokal für den
+  // Marker und wird niemals durch Berührungen in den Lanes oder im Plot übernommen.
+  const beginEndDrag = (
     kind: "medication" | "infusion",
     entry: MedicationEntry | InfusionEntry,
   ) => {
@@ -464,9 +480,6 @@ export function VitalTimeline({ patientBirthDate = "" }: { patientBirthDate?: st
     };
     therapyEndPlacementRef.current = placement;
     setTherapyEndPlacement(placement);
-    setDraft(null);
-    setTherapyDraft(null);
-    setCrosshair(null);
   };
 
   const previewTherapyEnd = (time: number) => {
@@ -488,18 +501,6 @@ export function VitalTimeline({ patientBirthDate = "" }: { patientBirthDate?: st
     } else {
       message.error("Das Ende muss nach dem Beginn liegen.");
     }
-  };
-
-  const endTimeAtClientX = (clientX: number) => {
-    const current = therapyEndPlacementRef.current;
-    if (!current || !svgRef.current) return null;
-    const entry = current.kind === "medication"
-      ? medications.find((item) => item.id === current.id)
-      : infusions.find((item) => item.id === current.id);
-    if (!entry) return null;
-    const rect = svgRef.current.getBoundingClientRect();
-    const x = clampValue(clientX - rect.left, layout.plotLeft, layout.plotRight);
-    return Math.round(clampValue(xToTime(xScale, x), entry.startedAt + 1_000, maxDocumentableTime(nowValue, endedAt)));
   };
 
   const onScalarDragMove = (measurement: ScalarMeasurement, clientX: number, clientY: number) => {
@@ -601,13 +602,6 @@ export function VitalTimeline({ patientBirthDate = "" }: { patientBirthDate?: st
       // Kein Textauswahl-/Kopieren-Effekt beim Zeichnen mit Stift/Finger.
       if (typeof window !== "undefined") window.getSelection?.()?.removeAllRanges?.();
     }
-    if (therapyEndPlacement) {
-      const time = endTimeAtClientX(event.clientX);
-      if (time !== null) previewTherapyEnd(time);
-      pointerRef.current = { ...EMPTY_POINTER, active: true, pointerId: event.pointerId, pointerType: event.pointerType, startX: event.clientX, startY: event.clientY };
-      if (twoPhase) { try { event.currentTarget.setPointerCapture(event.pointerId); } catch { /* ignore */ } }
-      return;
-    }
     setSelectedCheckpoint(null);
     const mapped = mapPointer(event.clientX, event.clientY);
     const rect = svgRef.current?.getBoundingClientRect();
@@ -659,11 +653,8 @@ export function VitalTimeline({ patientBirthDate = "" }: { patientBirthDate?: st
       if (checkpointDrag.current.kind) checkpointCrosshairAt(checkpointDrag.current.kind, event.clientX, event.clientY, activeCheckpoint.time);
       return;
     }
-    if (therapyEndPlacement) {
-      const time = endTimeAtClientX(event.clientX);
-      if (time !== null) previewTherapyEnd(time);
-      return;
-    }
+    // Ein laufender Endgriff-Drag wird ausschließlich vom Marker selbst gesteuert.
+    if (therapyEndPlacement) return;
     if (!state.active || state.pointerId !== event.pointerId) {
       if ((event.pointerType === "mouse" || event.pointerType === "pen") && !draft && !therapyDraft && !preview) {
         const mapped = mapPointer(event.clientX, event.clientY);
@@ -689,6 +680,9 @@ export function VitalTimeline({ patientBirthDate = "" }: { patientBirthDate?: st
     if (!state.targetId && !state.confirming && usesTwoPhase(event.pointerType)) {
       const mapped = mapPointer(event.clientX, event.clientY);
       setCrosshair("svgX" in mapped ? { ...mapped, locked: false } : null);
+      // §3: Beim Ziehen mit dem Stift über die Grafik bleiben aktive Medikamente
+      // und Infusionen dieser Zeit sichtbar – nicht nur beim Maus-Hover.
+      setIntervalTooltip(intervalAtPointer(event.clientX, event.clientY, false));
     }
   };
 
@@ -723,12 +717,6 @@ export function VitalTimeline({ patientBirthDate = "" }: { patientBirthDate?: st
     };
     if (!state.active || state.pointerId !== event.pointerId) {
       if (twoPhase) setInteractionActive(false);
-      return;
-    }
-    if (therapyEndPlacement) {
-      const time = endTimeAtClientX(event.clientX);
-      if (time !== null) commitTherapyEnd(time);
-      finish();
       return;
     }
     const target = state.targetId ? measurements.find((measurement) => measurement.id === state.targetId) : null;
@@ -920,9 +908,27 @@ export function VitalTimeline({ patientBirthDate = "" }: { patientBirthDate?: st
   };
 
   const showData = startedAt !== null;
-  // Kollisionsbewusste Position des Koordinaten-Tooltips (meidet die Warn-Icons);
-  // wird zusätzlich als Hindernis an den Therapie-Tooltip weitergegeben.
+  // §4: Koordinate, Warnhinweis und Therapie-Info werden gemeinsam kollisionsfrei
+  // platziert – in dieser Reihenfolge, damit die Koordinate immer am Zeiger bleibt.
   const crosshairTip = crosshair ? crosshairTooltipRect(crosshair, layout, warningIconRects) : null;
+  // Warnhinweis der Zeit unter dem Zeiger (Kontrollzeit und/oder kritischer Wert).
+  const warningInfo = crosshair ? warningInfoAt(crosshair, checkpointWarnings, criticalWarnings, measurements, xScale) : null;
+  const warningTip = warningInfo
+    ? placeTooltipAvoidingAll(
+        { x: crosshair!.svgX, y: crosshair!.svgY },
+        { width: 250, height: 16 + warningInfo.lines.length * 13 },
+        { left: layout.plotLeft, top: layout.plotTop, right: layout.plotRight, bottom: layout.plotBottom },
+        [...warningIconRects, ...(crosshairTip ? [crosshairTip] : [])],
+      )
+    : null;
+  const therapyTip = intervalTooltip
+    ? placeTooltipAvoidingAll(
+        { x: intervalTooltip.x, y: intervalTooltip.y },
+        therapyTooltipSize(intervalTooltip.items.length),
+        therapyTooltipBounds(layout),
+        [...warningIconRects, ...(crosshairTip ? [crosshairTip] : []), ...(warningTip ? [warningTip] : [])],
+      )
+    : null;
 
   return (
     <>
@@ -974,8 +980,6 @@ export function VitalTimeline({ patientBirthDate = "" }: { patientBirthDate?: st
                 selectedEvent={selectedEventType}
                 preview={lanePreview}
                 onPreview={setLanePreview}
-                activeEndPlacement={therapyEndPlacement !== null}
-                onPlaceTherapyEnd={(time) => commitTherapyEnd(time)}
                 onCreateMedication={(time) => openTherapyDraft({ mode: "create-medication", startedAt: time })}
                 onCreateInfusion={(time) => openTherapyDraft({ mode: "create-infusion", startedAt: time })}
                 onPlaceEvent={placeEvent}
@@ -1019,11 +1023,6 @@ export function VitalTimeline({ patientBirthDate = "" }: { patientBirthDate?: st
               onPointerDown={onPlotPointerDown}
               onPointerMove={onPlotPointerMove}
               onPointerUp={onPlotPointerUp}
-              onClick={(event) => {
-                if (!therapyEndPlacementRef.current) return;
-                const time = endTimeAtClientX(event.clientX);
-                if (time !== null) commitTherapyEnd(time);
-              }}
               onPointerCancel={onPlotPointerCancel}
               onLostPointerCapture={onPlotLostPointerCapture}
               onPointerLeave={() => {
@@ -1081,7 +1080,8 @@ export function VitalTimeline({ patientBirthDate = "" }: { patientBirthDate?: st
                   onEditEvent={(entry) => openTherapyDraft({ mode: "edit-event", entry })}
                   onCommitEventTime={updateEventTime}
                   selectedEnd={therapyEndPlacement}
-                  onSelectEnd={selectTherapyEnd}
+                  onFinishNow={finishTherapyNow}
+                  onBeginEndDrag={beginEndDrag}
                   onPreviewEnd={previewTherapyEnd}
                   onCommitEnd={commitTherapyEnd}
                   onCancelEnd={() => {
@@ -1098,11 +1098,22 @@ export function VitalTimeline({ patientBirthDate = "" }: { patientBirthDate?: st
                 x={intervalTooltip.x}
                 y={intervalTooltip.y}
                 layout={layout}
-                avoidRects={crosshairTip ? [crosshairTip, ...warningIconRects] : warningIconRects}
+                placedRect={therapyTip}
               />
             ) : null}
             <CrosshairLayer crosshair={crosshair} layout={layout} tooltipRect={crosshairTip} />
-            <TimelinePreviewLayer preview={preview} layout={layout} xScale={xScale} yScales={yScales} />
+            {warningInfo && warningTip ? (
+              <g pointerEvents="none" data-testid="warning-info">
+                <rect x={warningTip.x} y={warningTip.y} width={warningTip.width} height={warningTip.height} rx={6} className="warning-info-box" />
+                {warningInfo.lines.map((line, index) => (
+                  <text key={line} x={warningTip.x + 8} y={warningTip.y + 13 + index * 13} className="warning-info-text">{line}</text>
+                ))}
+              </g>
+            ) : null}
+            {/* §2: Solange eine Lane eine Live-Vorschau zeichnet, wird die abgelegte
+                Vorschau nicht gerendert. Zusammen mit dem synchronen Löschen beim
+                pointerdown ist damit nie mehr als eine Vorschau gleichzeitig sichtbar. */}
+            <TimelinePreviewLayer preview={interactionActive && lanePreview ? null : preview} layout={layout} xScale={xScale} yScales={yScales} />
             {renderDraftPreview(draft, xScale, yScales)}
           </svg>
         )}
@@ -1129,6 +1140,40 @@ function crosshairForMeasurement(
     svgY: yScales[measurement.kind](pointerValue),
     locked: true,
   };
+}
+
+const WARNING_INFO_MAX_DISTANCE_PX = 22;
+
+/**
+ * §4: Bedeutung der Warnung an der Zeigerposition – Kontrollzeit-Hinweis und/oder
+ * kritischer Messwert. Wird zusammen mit Koordinate und Therapie-Info angezeigt,
+ * damit alle drei Informationen gleichzeitig lesbar sind.
+ */
+function warningInfoAt(
+  crosshair: CrosshairState,
+  checkpointWarnings: ReturnType<typeof deriveCheckpointWarnings>,
+  criticalWarnings: ReturnType<typeof deriveCriticalWarnings>,
+  measurements: Measurement[],
+  xScale: BandContext["xScale"],
+): { lines: string[] } | null {
+  const lines: string[] = [];
+  const nearCheckpoint = checkpointWarnings.find(
+    (warning) => Math.abs(timeToX(xScale, warning.time) - crosshair.svgX) <= WARNING_INFO_MAX_DISTANCE_PX,
+  );
+  if (nearCheckpoint) {
+    lines.push(`Kontrollzeit ${formatClock(nearCheckpoint.time)}`);
+    for (const part of checkpointTooltip(nearCheckpoint).split("\n")) lines.push(part);
+  }
+  for (const warning of criticalWarnings) {
+    const measurement = measurements.find((item) => item.id === warning.measurementId);
+    if (!measurement || measurement.kind !== crosshair.kind) continue;
+    if (Math.abs(timeToX(xScale, measurement.time) - crosshair.svgX) > WARNING_INFO_MAX_DISTANCE_PX) continue;
+    lines.push("Kritischer Hinweis:");
+    for (const reason of warning.reasons) lines.push(`• ${reason}`);
+  }
+  if (lines.length === 0) return null;
+  // Kompakt halten: höchstens vier Zeilen, sonst wird die Box zu groß.
+  return { lines: lines.slice(0, 4).map((line) => (line.length > 46 ? `${line.slice(0, 45)}…` : line)) };
 }
 
 // Kollisionsbewusste Position des Koordinaten-Tooltips: bleibt im Band, meidet die

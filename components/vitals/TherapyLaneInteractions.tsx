@@ -45,8 +45,6 @@ interface Props {
   onPlaceEvent: (eventType: TimelineEventType, time: number) => void;
   onInvalid: (error: TimelineTimeError) => void;
   onMissingEvent: () => void;
-  activeEndPlacement: boolean;
-  onPlaceTherapyEnd: (time: number) => void;
   // Stift/Finger: erster Kontakt legt Vorschau ab, zweiter Kontakt bestaetigt.
   onTwoPhaseTap: (tap: LaneTwoPhaseTap) => void;
   // Beim pointerdown: erlaubt dem Elternteil, eine nicht bestätigte Vorschau sofort
@@ -87,14 +85,15 @@ function LaneTarget({
   onPlaceEvent,
   onInvalid,
   onMissingEvent,
-  activeEndPlacement,
-  onPlaceTherapyEnd,
   onTwoPhaseTap,
   onTwoPhaseDown,
   onInteractionActive,
 }: Props & { kind: TherapyLaneKind; lane: TimelineLayout["therapyLanes"][number] }) {
   const latest = useRef<LanePlacementPreview | null>(null);
   const twoPhase = useRef({ active: false, pointerId: -1 });
+  // Ein Tap fokussiert das Rect ebenfalls. Die Fokus-Vorschau ist aber nur eine
+  // Tastatur-Hilfe – nach einer Zeigergeste darf sie keine zweite Vorschau erzeugen.
+  const pointerFocus = useRef(false);
   const laneCenterY = lane.top + lane.height / 2;
   const mapEvent = (event: ReactPointerEvent<SVGRectElement>) => {
     const rect = event.currentTarget.ownerSVGElement?.getBoundingClientRect();
@@ -121,10 +120,6 @@ function LaneTarget({
       onInvalid(mapped.error);
       return;
     }
-    if (activeEndPlacement) {
-      onPlaceTherapyEnd(mapped.time);
-      return;
-    }
     if (kind === "event" && !selectedEvent) {
       onMissingEvent();
       return;
@@ -139,7 +134,6 @@ function LaneTarget({
     if (!mapped) return;
     onPreview(null);
     if (mapped.error) { onInvalid(mapped.error); return; }
-    if (activeEndPlacement) { onPlaceTherapyEnd(mapped.time); return; }
     if (kind === "event" && !selectedEvent) { onMissingEvent(); return; }
     onTwoPhaseTap({
       kind,
@@ -165,7 +159,7 @@ function LaneTarget({
       tabIndex={0}
       className="therapy-lane-hit"
       // touch-action: none -> die Interaktion in der Lane scrollt die Seite nicht.
-      style={{ touchAction: "none", cursor: activeEndPlacement ? "ew-resize" : kind === "event" && !selectedEvent ? "default" : "crosshair" }}
+      style={{ touchAction: "none", cursor: kind === "event" && !selectedEvent ? "default" : "crosshair" }}
       onPointerMove={(event) => {
         if (usesTwoPhase(event.pointerType)) {
           const mapped = mapEvent(event);
@@ -180,8 +174,9 @@ function LaneTarget({
       }}
       onPointerLeave={() => onPreview(null)}
       onFocus={() => {
+        // Fokus durch Tippen/Klicken erzeugt keine zusätzliche Vorschau.
+        if (pointerFocus.current) { pointerFocus.current = false; return; }
         const time = endedAt ?? now;
-        if (activeEndPlacement) return;
         onPreview(kind === "event" && !selectedEvent ? null : { kind, time, x: timeToX(xScale, time), error: null, ...(kind === "event" && selectedEvent ? { eventType: selectedEvent } : {}) });
       }}
       onBlur={() => onPreview(null)}
@@ -189,16 +184,13 @@ function LaneTarget({
         if (event.key !== "Enter" && event.key !== " ") return;
         event.preventDefault();
         const time = endedAt ?? now;
-        if (activeEndPlacement) {
-          onPlaceTherapyEnd(time);
-          return;
-        }
         if (kind === "medication") onCreateMedication(time);
         if (kind === "infusion") onCreateInfusion(time);
         if (kind === "event" && selectedEvent) onPlaceEvent(selectedEvent, time);
         if (kind === "event" && !selectedEvent) onMissingEvent();
       }}
       onPointerDown={(event) => {
+        pointerFocus.current = true;
         if (usesTwoPhase(event.pointerType)) {
           twoPhase.current = { active: true, pointerId: event.pointerId };
           try { event.currentTarget.setPointerCapture(event.pointerId); } catch { /* ignore */ }

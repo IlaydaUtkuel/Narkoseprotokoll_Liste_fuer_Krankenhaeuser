@@ -562,3 +562,179 @@ test("iPad R2 Story 11: Koordinate, Medikament-Info und Warnsymbol überlappen s
     expect(med.right).toBeLessThanOrEqual(boxes.vw);
   }
 });
+
+// ---- Runde 4: Scroll-Sperre, Vorschau-Ersetzung, Therapie-Info, Endmarker, NIBP-Aktivgriff ----
+
+// R4 Story 1: In Grafik UND Lanes verschiebt ein Pencil-Zug die Seite nicht;
+// ausserhalb bleibt die Seite scrollbar.
+test("iPad R4 Story 1: Pencil-Zug in Grafik und Lanes scrollt die Seite nicht", async ({ page }) => {
+  await seedStartedCase(page, 20);
+  const scrollable = await page.evaluate(() => document.documentElement.scrollHeight > window.innerHeight);
+  expect(scrollable).toBe(true);
+
+  const dragWithin = async (locator: Locator, id: number) => {
+    const box = await locator.boundingBox();
+    expect(box).not.toBeNull();
+    const x = box!.x + box!.width * 0.2;
+    const y = box!.y + box!.height / 2;
+    await page.evaluate(() => window.scrollTo(0, 150));
+    const before = await page.evaluate(() => window.scrollY);
+    await pointer(locator, "down", x, y, "pen", id);
+    for (const dy of [-40, -80, 40, 90]) await pointer(locator, "move", x + 5, y + dy, "pen", id);
+    const during = await page.evaluate(() => window.scrollY);
+    await pointer(locator, "up", x + 5, y + 90, "pen", id);
+    const after = await page.evaluate(() => window.scrollY);
+    expect(during).toBe(before);
+    expect(after).toBe(before);
+  };
+
+  await dragWithin(page.getByTestId("timeline-create-area"), 701);
+  await dragWithin(page.getByTestId("lane-create-medication"), 702);
+  await dragWithin(page.getByTestId("lane-create-infusion"), 703);
+
+  // Ausserhalb der interaktiven Flächen bleibt normales Scrollen möglich.
+  await page.evaluate(() => window.scrollTo(0, 60));
+  expect(await page.evaluate(() => window.scrollY)).toBe(60);
+  // Und der Body bleibt nach der Interaktion entsperrt.
+  expect(await page.evaluate(() => document.body.dataset.timelineScrollLock ?? "none")).toBe("none");
+});
+
+// R4 Story 2: Neue Berührung ersetzt die alte Vorschau sofort – in beiden Lanes.
+test("iPad R4 Story 2: neue Berührung ersetzt die alte Vorschau sofort (Medikamente und Infusionen)", async ({ page }) => {
+  await seedStartedCase(page, 20);
+  for (const [lane, id] of [["medication", 710], ["infusion", 720]] as const) {
+    const target = page.getByTestId(`lane-create-${lane}`);
+    const box = await target.boundingBox();
+    const y = box!.y + box!.height / 2;
+    const x1 = box!.x + box!.width * 0.1;
+    const x2 = box!.x + box!.width * 0.3;
+    await tap(target, x1, y, "pen", id);
+    await expect(page.getByTestId("timeline-preview")).toHaveCount(1);
+    const firstTime = await page.getByTestId("preview-coordinate").textContent();
+    // Neue Berührung weit entfernt: alte Vorschau sofort weg (schon beim pointerdown).
+    await pointer(target, "down", x2, y, "pen", id + 1);
+    await expect(page.getByTestId("timeline-preview")).toHaveCount(0);
+    await pointer(target, "up", x2, y, "pen", id + 1);
+    await expect(page.getByTestId("timeline-preview")).toHaveCount(1);
+    expect(await page.getByTestId("preview-coordinate").textContent()).not.toBe(firstTime);
+  }
+});
+
+// R4 Story 3: Beim Ziehen über die Grafik bleiben Koordinate UND Therapie-Info sichtbar.
+test("iPad R4 Story 3: Therapie-Info erscheint beim Pencil-Zug über die Grafik", async ({ page }) => {
+  const startedAt = Date.now() - 20 * 60_000;
+  await page.goto("/dokumentation");
+  await page.evaluate((started) => {
+    localStorage.setItem("sikant-anesthesia-demo-case:v1", JSON.stringify({
+      schemaVersion: 6, caseId: "r4-therapy", caseRevision: 1, lastSuccessfullyExportedRevision: null,
+      startedAt: started, endedAt: null, measurements: [],
+      medications: [{ id: "m1", kind: "medication", administrationType: "continuous", name: "Dauer-Perfusor", startedAt: started + 60_000, dose: 4, unit: { label: "mg", code: "mg", system: "UCUM", isCustom: false }, concentration: null, endedAt: null, ongoing: true, createdAt: started, updatedAt: started }],
+      infusions: [], events: [], lastSavedAt: started,
+    }));
+  }, startedAt);
+  await page.reload();
+  await expect(page.getByTestId("case-started")).toBeVisible();
+
+  const area = page.getByTestId("timeline-create-area");
+  const band = await page.getByTestId("band-spo2").boundingBox();
+  const box = await area.boundingBox();
+  const x = box!.x + box!.width * 0.2;
+  const y = band!.y + band!.height / 2;
+  await pointer(area, "down", x, y, "pen", 731);
+  await pointer(area, "move", x + 12, y + 10, "pen", 731);
+  await expect(page.getByTestId("timeline-crosshair")).toBeVisible();
+  await expect(page.getByTestId("crosshair-coordinate")).toContainText("SpO₂");
+  await expect(page.getByTestId("therapy-interval-tooltip")).toContainText("Dauer-Perfusor");
+  await pointer(area, "up", x + 12, y + 10, "pen", 731);
+});
+
+// R4 Story 4: "Anwendung beenden" fixiert den Endmarker; spätere Berührungen verschieben ihn nicht.
+test("iPad R4 Story 4: Endmarker bleibt nach 'Anwendung beenden' an seiner Stelle", async ({ page }) => {
+  const startedAt = Date.now() - 20 * 60_000;
+  await page.goto("/dokumentation");
+  await page.evaluate((started) => {
+    localStorage.setItem("sikant-anesthesia-demo-case:v1", JSON.stringify({
+      schemaVersion: 6, caseId: "r4-end", caseRevision: 1, lastSuccessfullyExportedRevision: null,
+      startedAt: started, endedAt: null, measurements: [],
+      medications: [{ id: "m9", kind: "medication", administrationType: "continuous", name: "Laufender Perfusor", startedAt: started + 60_000, dose: 4, unit: { label: "mg", code: "mg", system: "UCUM", isCustom: false }, concentration: null, endedAt: null, ongoing: true, createdAt: started, updatedAt: started }],
+      infusions: [], events: [], lastSavedAt: started,
+    }));
+  }, startedAt);
+  await page.reload();
+
+  await page.getByTestId("medication-m9-stop-action").click();
+  const ended = await page.evaluate(() => JSON.parse(localStorage.getItem("sikant-anesthesia-demo-case:v1")!).medications[0].endedAt);
+  expect(ended).toBeGreaterThan(startedAt);
+
+  // Berührung an anderer Stelle in der Medikamente-Lane: nur neue Vorschau.
+  const lane = page.getByTestId("lane-create-medication");
+  const box = await lane.boundingBox();
+  const x = box!.x + box!.width * 0.15;
+  const y = box!.y + box!.height / 2;
+  await tap(lane, x, y, "pen", 741);
+  await expect(page.getByTestId("timeline-preview")).toBeVisible();
+  const afterTouch = await page.evaluate(() => JSON.parse(localStorage.getItem("sikant-anesthesia-demo-case:v1")!).medications[0].endedAt);
+  expect(afterTouch).toBe(ended);
+
+  await page.reload();
+  const reloaded = await page.evaluate(() => JSON.parse(localStorage.getItem("sikant-anesthesia-demo-case:v1")!).medications[0].endedAt);
+  expect(reloaded).toBe(ended);
+});
+
+// R4 Story 5: "Alles Löschen" fragt nach und leert dann nur die Formulareingaben.
+test("iPad R4 Story 5: 'Alles Löschen' löscht erst nach Bestätigung", async ({ page }) => {
+  await seedStartedCase(page, 20);
+  const lane = page.getByTestId("lane-create-medication");
+  const box = await lane.boundingBox();
+  const x = box!.x + box!.width * 0.2;
+  const y = box!.y + box!.height / 2;
+  await tap(lane, x, y, "pen", 751);
+  await tap(lane, x, y, "pen", 752);
+  await expect(page.getByTestId("medication-name")).toBeVisible();
+
+  await page.getByTestId("medication-name").fill("Test-Medikament");
+  await page.getByTestId("medication-dose").fill("7");
+  await expect(page.getByTestId("therapy-clear-all")).toBeVisible();
+
+  // Erster Klick löscht nicht, sondern fragt.
+  await page.getByTestId("therapy-clear-all").click();
+  await expect(page.getByText("Alle Eingaben löschen?")).toBeVisible();
+  await expect(page.getByTestId("medication-name")).toHaveValue("Test-Medikament");
+  await page.locator(".ant-popconfirm").getByRole("button", { name: "Abbrechen" }).click();
+  await expect(page.getByTestId("medication-name")).toHaveValue("Test-Medikament");
+
+  // Nach Bestätigung sind die Eingaben leer.
+  await page.getByTestId("therapy-clear-all").click();
+  await page.locator(".ant-popconfirm").getByRole("button", { name: "Alles löschen" }).click();
+  await expect(page.getByTestId("medication-name")).toHaveValue("");
+  await expect(page.getByTestId("medication-dose")).toHaveValue("");
+});
+
+// R4 Story 6: Aktiver NIBP-Griff wird schwarz, der andere bleibt weiss.
+test("iPad R4 Story 6: aktiver NIBP-Griff ist schwarz, der andere weiss", async ({ page }) => {
+  await seedStartedCase(page, 20, [
+    { id: "n4", kind: "nibp", time: Date.now() - 15 * 60_000, systolic: 120, mean: 90, diastolic: 60, createdAt: Date.now(), updatedAt: Date.now() },
+  ]);
+  const dia = page.getByTestId("nibp-handle-diastolic").locator('circle[role="button"]');
+  const box = await dia.boundingBox();
+  const x = box!.x + box!.width / 2;
+  const y = box!.y + box!.height / 2;
+
+  const activeStates = () => page.evaluate(() => ({
+    systolic: document.querySelector('[data-testid="nibp-handle-systolic"]')?.getAttribute("data-active"),
+    diastolic: document.querySelector('[data-testid="nibp-handle-diastolic"]')?.getAttribute("data-active"),
+  }));
+
+  expect(await activeStates()).toEqual({ systolic: "false", diastolic: "false" });
+  await pointer(dia, "down", x, y, "pen", 761);
+  expect(await activeStates()).toEqual({ systolic: "false", diastolic: "true" });
+  // Der aktive Griff ist schwarz gefüllt.
+  const fill = await page.evaluate(() => {
+    const visual = document.querySelectorAll('[data-testid="nibp-handle-diastolic"] circle')[1];
+    return getComputedStyle(visual).fill;
+  });
+  expect(fill).toBe("rgb(0, 0, 0)");
+  await pointer(dia, "up", x, y, "pen", 761);
+  // Nach dem Loslassen wieder weiss/inaktiv.
+  expect(await activeStates()).toEqual({ systolic: "false", diastolic: "false" });
+});

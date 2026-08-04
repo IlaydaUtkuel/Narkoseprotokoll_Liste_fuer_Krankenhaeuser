@@ -33,6 +33,7 @@ import {
   TIME_ERROR_MESSAGES,
   validateTimelineTime,
 } from "../../lib/timeline/timeValidation";
+import { ClearAllButton } from "./ClearAllButton";
 import { resetDrawerScrollTop } from "../../lib/timeline/drawerScroll";
 import { useCaseStore, type NewInfusion, type NewMedication } from "../../store/anesthesiaCaseStore";
 import type {
@@ -70,6 +71,14 @@ type InfusionValues = CommonTherapyValues & {
   name: string;
   amount: number;
 };
+
+// Felder, die "Alles Löschen" im jeweiligen Formular leert. Die Zeit bleibt
+// erhalten: sie stammt aus der gewählten Position auf der Zeitachse und ist keine
+// getippte Eingabe.
+const COMMON_CLEAR_FIELDS = ["unitCode", "customUnit", "concentrationValue", "concentrationUnitCode", "durationMinutes", "endDate", "endClock"];
+const MEDICATION_FIELDS = ["name", "dose", ...COMMON_CLEAR_FIELDS];
+const INFUSION_FIELDS = ["name", "amount", ...COMMON_CLEAR_FIELDS];
+const EVENT_FIELDS = ["comment"];
 
 export function TherapyEntryDrawer({ draft, onClose }: Props) {
   const { message } = App.useApp();
@@ -241,7 +250,7 @@ function MedicationForm({
       </Flex>
       <ConcentrationFields />
       <TherapyEndFields initialTime={initialTime} showStopAction={existing?.ongoing === true} />
-      <FormActions onCancel={onCancel} onDelete={onDelete} deleteLabel="Medikament entfernen" />
+      <FormActions onCancel={onCancel} onDelete={onDelete} deleteLabel="Medikament entfernen" clearFields={MEDICATION_FIELDS} isEdit={existing !== null} />
     </Form>
   );
 }
@@ -311,7 +320,7 @@ function InfusionForm({
       </Flex>
       <ConcentrationFields />
       <TherapyEndFields initialTime={initialTime} showStopAction={existing?.ongoing === true} />
-      <FormActions onCancel={onCancel} onDelete={onDelete} deleteLabel="Infusion entfernen" />
+      <FormActions onCancel={onCancel} onDelete={onDelete} deleteLabel="Infusion entfernen" clearFields={INFUSION_FIELDS} isEdit={existing !== null} />
     </Form>
   );
 }
@@ -506,6 +515,8 @@ function EventForm({
         deleteLabel={eventType === "extra" ? "Extra löschen" : "Ereignis entfernen"}
         deleteButtonLabel={eventType === "extra" ? "Löschen" : "Entfernen"}
         confirmDelete={draft.mode === "edit-event"}
+        clearFields={EVENT_FIELDS}
+        isEdit={draft.mode === "edit-event"}
       />
     </Form>
   );
@@ -573,18 +584,25 @@ function FormActions({
   deleteLabel,
   deleteButtonLabel = "Entfernen",
   confirmDelete = true,
+  clearFields,
+  isEdit = false,
 }: {
   onCancel: () => void;
   onDelete?: () => void;
   deleteLabel: string;
   deleteButtonLabel?: string;
   confirmDelete?: boolean;
+  // Feldnamen, die "Alles Löschen" im Formular leert (nur Eingaben, kein Datensatz).
+  clearFields: string[];
+  isEdit?: boolean;
 }) {
+  const form = Form.useFormInstance();
   return (
     <Flex justify="space-between" gap={12} wrap>
-      <Flex gap={8}>
+      <Flex gap={8} wrap>
         <Button type="primary" htmlType="submit" data-testid="therapy-save">Speichern</Button>
         <Button onClick={onCancel} data-testid="therapy-cancel">Abbrechen</Button>
+        <ClearAllButton form={form} fields={clearFields} isEdit={isEdit} testId="therapy-clear-all" />
       </Flex>
       {onDelete && confirmDelete ? (
         <Popconfirm title={`${deleteLabel}?`} okText={deleteButtonLabel} cancelText="Abbrechen" onConfirm={onDelete}>

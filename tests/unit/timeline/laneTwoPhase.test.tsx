@@ -30,8 +30,6 @@ function setup(selectedEvent: "incision" | null = null) {
         now={END}
         selectedEvent={selectedEvent}
         preview={null}
-        activeEndPlacement={false}
-        onPlaceTherapyEnd={vi.fn()}
         {...handlers}
       />
     </svg>,

@@ -9,6 +9,7 @@ import {
   timestampFromClockParts,
   validateTimelineTime,
 } from "../../lib/timeline/timeValidation";
+import { ClearAllButton } from "./ClearAllButton";
 import { resetDrawerScrollTop } from "../../lib/timeline/drawerScroll";
 import { useCaseStore } from "../../store/anesthesiaCaseStore";
 import type { EntryDraft } from "./timelineTypes";
@@ -192,7 +193,7 @@ function ScalarForm({
           />
         )}
       </Form.Item>
-      <FormActions onCancel={onCancel} />
+      <FormActions onCancel={onCancel} clearFields={["value"]} isEdit={draft.mode === "edit-scalar"} />
     </Form>
   );
 }
@@ -284,7 +285,7 @@ function NibpForm({
           ? "Werte direkt eingeben oder die weißen Griffe anschließend im Diagramm ziehen."
           : "Nach dem Speichern erscheinen oberhalb und unterhalb des Mittelwerts Griffe für Systolisch und Diastolisch."}
       </p>
-      <FormActions onCancel={onCancel} />
+      <FormActions onCancel={onCancel} clearFields={["mean", "systolic", "diastolic"]} isEdit={editing} />
     </Form>
   );
 }
@@ -364,15 +365,17 @@ function TimeField({
   );
 }
 
-function FormActions({ onCancel }: { onCancel: () => void }) {
+function FormActions({ onCancel, clearFields, isEdit = false }: { onCancel: () => void; clearFields: string[]; isEdit?: boolean }) {
+  const form = Form.useFormInstance();
   return (
-    <Flex gap={12} style={{ marginTop: 4 }}>
+    <Flex gap={12} wrap style={{ marginTop: 4 }}>
       <Button type="primary" htmlType="submit" data-testid="entry-save">
         Speichern
       </Button>
       <Button onClick={onCancel} data-testid="entry-cancel">
         Abbrechen
       </Button>
+      <ClearAllButton form={form} fields={clearFields} isEdit={isEdit} testId="entry-clear-all" />
     </Flex>
   );
 }

@@ -779,7 +779,7 @@ test("Checkpoint-Y übernimmt Herzfrequenz und NIBP-Mittel aus der echten Klickh
   await expect(page.getByTestId("entry-mean")).toHaveValue("125");
 });
 
-test("Therapieende über Mitternacht, Einheit und Ende-Handle bleiben nach Drag, Zielklick und Reload konsistent", async ({ page }, testInfo) => {
+test("Therapieende über Mitternacht, Einheit und Ende-Handle bleiben nach Drag und Reload konsistent; fremde Beruehrungen verschieben ihn nicht", async ({ page }, testInfo) => {
   await page.goto("/dokumentation");
   await seedStartedCase(page, 20);
   await tapLaneFraction(page, "medication", 0.08);
@@ -820,6 +820,8 @@ test("Therapieende über Mitternacht, Einheit und Ende-Handle bleiben nach Drag,
   const dragged = await page.evaluate(() => JSON.parse(localStorage.getItem("sikant-anesthesia-demo-case:v1")!).medications[0]);
   expect(dragged.endedAt).toBeLessThan(initial.endedAt);
 
+  // §5: Ein reiner Tap auf den Endgriff darf keinen Platzierungsmodus starten und
+  // eine spaetere Beruehrung an anderer Stelle darf den Endmarker nicht verschieben.
   const movedHit = page.getByTestId(`medication-${initial.id}-end-hit`);
   await movedHit.scrollIntoViewIfNeeded();
   if (testInfo.project.name === "ipad-viewport") {
@@ -828,35 +830,24 @@ test("Therapieende über Mitternacht, Einheit und Ende-Handle bleiben nach Drag,
   } else {
     await movedHit.click();
   }
-  await expect(page.getByTestId("therapy-end-preview")).toBeVisible();
-  const temperatureBand = page.getByTestId("band-temperature");
-  const createArea = page.getByTestId("timeline-create-area");
-  await temperatureBand.scrollIntoViewIfNeeded();
-  const [temperatureBox, createAreaBox, nowDotBox] = await Promise.all([
-    temperatureBand.boundingBox(),
-    createArea.boundingBox(),
-    page.getByTestId("now-dot").boundingBox(),
-  ]);
-  expect(temperatureBox).not.toBeNull();
-  expect(createAreaBox).not.toBeNull();
-  expect(nowDotBox).not.toBeNull();
-  const placement = {
-    x: nowDotBox!.x + nowDotBox!.width / 2 - createAreaBox!.x - 10,
-    y: temperatureBox!.y + temperatureBox!.height / 2 - createAreaBox!.y,
-  };
-  if (testInfo.project.name === "ipad-viewport") {
-    const clientX = createAreaBox!.x + placement.x;
-    const clientY = createAreaBox!.y + placement.y;
-    await createArea.dispatchEvent("pointerdown", { pointerId: 51, pointerType: "touch", isPrimary: true, button: 0, buttons: 1, clientX, clientY });
-    await createArea.dispatchEvent("pointerup", { pointerId: 51, pointerType: "touch", isPrimary: true, button: 0, buttons: 0, clientX, clientY });
-  } else {
-    await createArea.click({ position: placement });
-  }
-  const placed = await page.evaluate(() => JSON.parse(localStorage.getItem("sikant-anesthesia-demo-case:v1")!).medications[0]);
-  expect(placed.endedAt).not.toBe(dragged.endedAt);
+  await expect(page.getByTestId("therapy-end-preview")).toHaveCount(0);
+
+  // Beruehrung an einer ANDEREN Stelle der Medikamente-Lane (genau der gemeldete Fall):
+  // sie startet dort eine neue Auswahl und darf den gesetzten Endmarker nicht verschieben.
+  const lane = page.getByTestId("lane-create-medication");
+  await lane.scrollIntoViewIfNeeded();
+  const laneBox = await lane.boundingBox();
+  expect(laneBox).not.toBeNull();
+  const tapX = laneBox!.x + laneBox!.width * 0.2;
+  const tapY = laneBox!.y + laneBox!.height / 2;
+  await lane.dispatchEvent("pointerdown", { pointerId: 61, pointerType: "pen", isPrimary: true, button: 0, buttons: 1, clientX: tapX, clientY: tapY });
+  await lane.dispatchEvent("pointerup", { pointerId: 61, pointerType: "pen", isPrimary: true, button: 0, buttons: 0, clientX: tapX, clientY: tapY });
+  await expect(page.getByTestId("timeline-preview")).toBeVisible();
+  const afterTouch = await page.evaluate(() => JSON.parse(localStorage.getItem("sikant-anesthesia-demo-case:v1")!).medications[0]);
+  expect(afterTouch.endedAt).toBe(dragged.endedAt);
   await page.reload();
   const reloaded = await page.evaluate(() => JSON.parse(localStorage.getItem("sikant-anesthesia-demo-case:v1")!).medications[0]);
-  expect(reloaded.endedAt).toBe(placed.endedAt);
+  expect(reloaded.endedAt).toBe(dragged.endedAt);
   expect(reloaded.unit.code).toBe("mg");
 });
 
