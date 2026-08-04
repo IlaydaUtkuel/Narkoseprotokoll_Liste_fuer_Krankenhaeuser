@@ -78,7 +78,6 @@ type InfusionValues = CommonTherapyValues & {
 const COMMON_CLEAR_FIELDS = ["unitCode", "customUnit", "concentrationValue", "concentrationUnitCode", "durationMinutes", "endDate", "endClock"];
 const MEDICATION_FIELDS = ["name", "dose", ...COMMON_CLEAR_FIELDS];
 const INFUSION_FIELDS = ["name", "amount", ...COMMON_CLEAR_FIELDS];
-const EVENT_FIELDS = ["comment"];
 
 export function TherapyEntryDrawer({ draft, onClose }: Props) {
   const { message } = App.useApp();
@@ -353,6 +352,13 @@ function UnitField({
           data-testid={`${kind}-unit`}
           style={{ minWidth: 210 }}
           placeholder="Einheit auswählen"
+          // Ohne virtuelle Liste bleibt auch der erste Eintrag (z. B. mL) auf dem
+          // iPad zuverlässig antippbar.
+          virtual={false}
+          listHeight={320}
+          // Ausserhalb des scrollenden Drawer-Bodys rendern: die Liste wird nie
+          // abgeschnitten, auch der erste Eintrag (mL) bleibt antippbar.
+          getPopupContainer={() => document.body}
         />
       </Form.Item>
       {selectedCode === CUSTOM_UNIT_VALUE ? (
@@ -384,6 +390,9 @@ function ConcentrationFields() {
           showSearch
           optionFilterProp="label"
           allowClear
+          virtual={false}
+          listHeight={320}
+          getPopupContainer={() => document.body}
           data-testid="therapy-concentration-unit"
           options={CONCENTRATION_UNITS.map((option) => ({ value: option.code, label: option.displayLabel }))}
           style={{ minWidth: 170 }}
@@ -515,8 +524,6 @@ function EventForm({
         deleteLabel={eventType === "extra" ? "Extra löschen" : "Ereignis entfernen"}
         deleteButtonLabel={eventType === "extra" ? "Löschen" : "Entfernen"}
         confirmDelete={draft.mode === "edit-event"}
-        clearFields={EVENT_FIELDS}
-        isEdit={draft.mode === "edit-event"}
       />
     </Form>
   );
@@ -593,7 +600,7 @@ function FormActions({
   deleteButtonLabel?: string;
   confirmDelete?: boolean;
   // Feldnamen, die "Alles Löschen" im Formular leert (nur Eingaben, kein Datensatz).
-  clearFields: string[];
+  clearFields?: string[];
   isEdit?: boolean;
 }) {
   const form = Form.useFormInstance();
@@ -602,7 +609,7 @@ function FormActions({
       <Flex gap={8} wrap>
         <Button type="primary" htmlType="submit" data-testid="therapy-save">Speichern</Button>
         <Button onClick={onCancel} data-testid="therapy-cancel">Abbrechen</Button>
-        <ClearAllButton form={form} fields={clearFields} isEdit={isEdit} testId="therapy-clear-all" />
+        {clearFields ? <ClearAllButton form={form} fields={clearFields} isEdit={isEdit} testId="therapy-clear-all" /> : null}
       </Flex>
       {onDelete && confirmDelete ? (
         <Popconfirm title={`${deleteLabel}?`} okText={deleteButtonLabel} cancelText="Abbrechen" onConfirm={onDelete}>

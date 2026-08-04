@@ -38,6 +38,7 @@ import type {
 } from "../types/patient";
 import styles from "./PatientBaseDataForm.module.css";
 import { noKnownAllergiesPatch } from "../lib/allergy-toggle";
+import { formatPersonName } from "../lib/patient-name";
 import { BasisDataSummary } from "./BasisDataSummary";
 import { loadCase, saveCase } from "../lib/timeline/casePersistence";
 import { syncCriticalSettingsBirthDate } from "../lib/timeline/criticalSettingsStorage";
@@ -113,7 +114,7 @@ export function PatientBaseDataForm() {
     editSessionRef.current = editSession;
   }, [editSession]);
 
-  const { statuses, reportSaving, reportError, markSaved, resetStatuses } = useDebouncedFieldSave();
+  const { statuses, reportSaving, reportSaved, reportError, markSaved, resetStatuses } = useDebouncedFieldSave();
 
   // Beim ersten Rendern (nur im Browser) gespeicherte Daten laden.
   useEffect(() => {
@@ -164,7 +165,7 @@ export function PatientBaseDataForm() {
   // nach localStorage. Der Anzeige-Status ("Wird gespeichert …" -> "✓ Gespeichert")
   // laeuft davon unabhaengig ueber den Timer im Hook.
   const applyChange = useCallback(
-    (patch: Partial<PatientBaseData>, statusField: PatientField) => {
+    (patch: Partial<PatientBaseData>, statusField: PatientField, immediate = false) => {
       if (editSessionRef.current) {
         const nextDraft = { ...dataRef.current, ...patch };
         const nextSession = { ...editSessionRef.current, draftBasisData: nextDraft };
@@ -195,12 +196,15 @@ export function PatientBaseDataForm() {
       setData(next);
       try {
         savePatientData(next);
-        reportSaving(statusField);
+        // Umschalter (z.B. "Keine Allergien bekannt") sind sofort abgeschlossen und
+        // zeigen ohne Wartezeit "Gespeichert"; Texteingaben behalten die Tipppause.
+        if (immediate) reportSaved(statusField);
+        else reportSaving(statusField);
       } catch {
         reportError(statusField);
       }
     },
-    [reportSaving, reportError],
+    [reportSaving, reportSaved, reportError],
   );
 
   const handleChange = useCallback(
@@ -224,13 +228,13 @@ export function PatientBaseDataForm() {
 
   const enableNoKnownAllergies = useCallback(() => {
     const patch = noKnownAllergiesPatch(dataRef.current, true);
-    if (patch) applyChange(patch, "allergies");
+    if (patch) applyChange(patch, "allergies", true);
   }, [applyChange]);
 
   const toggleNoKnownAllergies = useCallback(() => {
     if (dataRef.current.noKnownAllergies) {
       const patch = noKnownAllergiesPatch(dataRef.current, false);
-      if (patch) applyChange(patch, "allergies");
+      if (patch) applyChange(patch, "allergies", true);
       return;
     }
     if (dataRef.current.allergies.trim()) {
@@ -397,9 +401,11 @@ export function PatientBaseDataForm() {
             id="patientName"
             data-testid="input-patientName"
             value={data.patientName}
-            onChange={(e) => handleChange("patientName", e.target.value)}
+            // Jeder Namensteil beginnt automatisch gross, der Rest bleibt klein.
+            onChange={(e) => handleChange("patientName", formatPersonName(e.target.value))}
             placeholder="z. B. Max Mustermann"
             autoComplete="off"
+            autoCapitalize="words"
           />
         </Field>
 

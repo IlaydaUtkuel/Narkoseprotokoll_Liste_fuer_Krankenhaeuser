@@ -71,12 +71,13 @@ export const PREVIEW_TTL_MS = 3000;
 export const MIN_NIBP_GAP = 1;
 
 // Sichtbarer Radius des gestrichelten Vorschau-Kreises (Medikamente/Infusionen).
-// Durchmesser ~32 px – deutlich sichtbar, aber nicht wie ein echter Messwert.
-export const PREVIEW_CIRCLE_RADIUS_PX = 16;
+// Durchmesser ~44 px – gut sichtbar und mit dem Stift sicher zu treffen.
+export const PREVIEW_CIRCLE_RADIUS_PX = 22;
 
-// Unsichtbarer Trefferradius der abgelegten Vorschau: der zweite Kontakt muss die
-// exakte Linie nicht treffen. 22 px ⇒ 44×44 px Zielgröße (WCAG-nah).
-export const PREVIEW_HIT_RADIUS_PX = 22;
+// Unsichtbarer Trefferradius der abgelegten Vorschau: JEDE Berührung innerhalb des
+// Kreises (und etwas darüber hinaus) übernimmt exakt die gemerkte Uhrzeit der
+// Vorschau – die dünne Linie selbst muss nie getroffen werden.
+export const PREVIEW_HIT_RADIUS_PX = 30;
 
 // WCAG-nahe Mindestgroesse fuer primaere Touch-/Pen-Ziele. Sichtbare Symbole
 // duerfen kleiner bleiben; ihr interaktiver Container verwendet diesen Wert.

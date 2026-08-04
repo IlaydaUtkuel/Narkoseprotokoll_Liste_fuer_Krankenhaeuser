@@ -37,7 +37,7 @@ test("das Laden des Demofalls ersetzt vorhandene Angaben nur nach Bestätigung",
   const dialog = page.locator(".ant-modal-confirm");
   await expect(dialog).toContainText("Fiktiven Demofall laden?");
   await dialog.getByRole("button", { name: "Abbrechen" }).click();
-  await expect(page.getByTestId("input-patientName")).toHaveValue("Noch nicht gespeicherter Patient");
+  await expect(page.getByTestId("input-patientName")).toHaveValue("Noch Nicht Gespeicherter Patient");
   await expect(page).toHaveURL(/\/$/);
 
   await page.getByTestId("load-fictional-demo").click();

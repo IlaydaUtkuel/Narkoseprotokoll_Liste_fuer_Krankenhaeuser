@@ -90,16 +90,33 @@ export function placeTooltipAvoidingAll(
     );
   }
   const candidates = positions.map((position) => clampRect({ ...position, ...size }, bounds));
+  // Abstand des Zeigers zum naechstgelegenen Punkt des Rechtecks (0 = innerhalb).
+  const distanceToPointer = (rect: TooltipRect) => {
+    const dx = Math.max(rect.x - pointer.x, 0, pointer.x - (rect.x + rect.width));
+    const dy = Math.max(rect.y - pointer.y, 0, pointer.y - (rect.y + rect.height));
+    return Math.hypot(dx, dy);
+  };
   let best = candidates[0];
   let bestOverlap = Number.POSITIVE_INFINITY;
+  let nearest: TooltipRect | null = null;
+  let nearestDistance = Number.POSITIVE_INFINITY;
   for (const candidate of candidates) {
     let overlap = 0;
     for (const rect of avoid) overlap += tooltipOverlapArea(candidate, rect);
-    if (overlap === 0) return candidate;
+    if (overlap === 0) {
+      // Unter allen kollisionsfreien Positionen die dem Zeiger naechste waehlen,
+      // damit die Information direkt beim Stift steht und nicht weit entfernt.
+      const distance = distanceToPointer(candidate);
+      if (distance < nearestDistance) {
+        nearest = candidate;
+        nearestDistance = distance;
+      }
+      continue;
+    }
     if (overlap < bestOverlap) {
       best = candidate;
       bestOverlap = overlap;
     }
   }
-  return best;
+  return nearest ?? best;
 }

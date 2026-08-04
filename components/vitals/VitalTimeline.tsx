@@ -141,6 +141,9 @@ export function VitalTimeline({ patientBirthDate = "" }: { patientBirthDate?: st
   const [lanePreview, setLanePreview] = useState<LanePlacementPreview | null>(null);
   const [intervalTooltip, setIntervalTooltip] = useState<IntervalTooltipState | null>(null);
   const [selectedCheckpoint, setSelectedCheckpoint] = useState<number | null>(null);
+  // Ausgewählter (schwarz umrandeter) Messpunkt: nur er folgt dem Stift. Ohne
+  // Auswahl bleiben bestehende Punkte beim Darüberfahren unverändert.
+  const [armedMeasurementId, setArmedMeasurementId] = useState<string | null>(null);
   // Checkpoint-Eingabemodus (§11/§12): X ist auf die Kontrollzeit fixiert, der Stift
   // legt nur den Y-Wert fest. Ein aktiver Modus schließt den Normalmodus aus.
   const [activeCheckpoint, setActiveCheckpoint] = useState<ActiveCheckpoint | null>(null);
@@ -670,7 +673,19 @@ export function VitalTimeline({ patientBirthDate = "" }: { patientBirthDate?: st
           measurement.id === state.targetId && measurement.kind !== "nibp",
         )
       : null;
-    if (target && state.moved) {
+    // Ein ausgewählter (schwarz umrandeter) Punkt folgt dem Stift überall im Plot.
+    const armed = armedMeasurementId
+      ? measurements.find((measurement): measurement is ScalarMeasurement =>
+          measurement.id === armedMeasurementId && measurement.kind !== "nibp",
+        )
+      : null;
+    if (armed && usesTwoPhase(event.pointerType)) {
+      state.dragging = true;
+      onScalarDragMove(armed, event.clientX, event.clientY);
+      return;
+    }
+    // Stift/Finger verschieben einen Punkt nur, wenn er zuvor ausgewählt wurde.
+    if (target && state.moved && !usesTwoPhase(event.pointerType)) {
       state.dragging = true;
       onScalarDragMove(target, event.clientX, event.clientY);
       return;
@@ -730,13 +745,35 @@ export function VitalTimeline({ patientBirthDate = "" }: { patientBirthDate?: st
       }
       if (!touchedInterval) setIntervalTooltip(null);
     }
+    // Stift/Finger: der ausgewählte Punkt wurde verschoben -> jetzt speichern.
+    const armedTarget = armedMeasurementId
+      ? measurements.find((measurement): measurement is ScalarMeasurement =>
+          measurement.id === armedMeasurementId && measurement.kind !== "nibp",
+        )
+      : null;
+    if (twoPhase && armedTarget) {
+      // Erneuter Tipp auf den ausgewählten Punkt hebt die Auswahl auf: der Wert
+      // bleibt danach fest, auch wenn der Stift darüber hinwegzieht.
+      if (!state.moved && target && target.id === armedTarget.id) {
+        setDragPreview(null);
+        setArmedMeasurementId(null);
+        finish();
+        return;
+      }
+      if (state.dragging || state.moved) finishScalarDrag(armedTarget);
+      finish();
+      return;
+    }
     if (state.dragging && target && target.kind !== "nibp") {
       finishScalarDrag(target);
       finish();
       return;
     }
     if (target && !state.moved) {
-      openEdit(target);
+      // iPad: erst auswählen (schwarzer Ring), dann folgt der Punkt dem Stift.
+      // Maus/Desktop: unverändert direkt bearbeiten.
+      if (twoPhase && target.kind !== "nibp") setArmedMeasurementId(target.id);
+      else openEdit(target);
       finish();
       return;
     }
@@ -901,6 +938,8 @@ export function VitalTimeline({ patientBirthDate = "" }: { patientBirthDate?: st
     now: nowValue,
     selectedId,
     dragPreview,
+    pointerTime: crosshair?.time ?? null,
+    armedId: armedMeasurementId,
     onPointTap: openEdit,
     onScalarDragMove,
     onScalarDragEnd: finishScalarDrag,
@@ -912,7 +951,7 @@ export function VitalTimeline({ patientBirthDate = "" }: { patientBirthDate?: st
   // platziert – in dieser Reihenfolge, damit die Koordinate immer am Zeiger bleibt.
   const crosshairTip = crosshair ? crosshairTooltipRect(crosshair, layout, warningIconRects) : null;
   // Warnhinweis der Zeit unter dem Zeiger (Kontrollzeit und/oder kritischer Wert).
-  const warningInfo = crosshair ? warningInfoAt(crosshair, checkpointWarnings, criticalWarnings, measurements, xScale) : null;
+  const warningInfo = crosshair ? warningInfoAt(crosshair, checkpointWarnings, criticalWarnings, measurements, xScale, yScales, layout) : null;
   const warningTip = warningInfo
     ? placeTooltipAvoidingAll(
         { x: crosshair!.svgX, y: crosshair!.svgY },
@@ -992,7 +1031,9 @@ export function VitalTimeline({ patientBirthDate = "" }: { patientBirthDate?: st
             ) : null}
             <EventLaneTools
               layout={layout}
-              disabled={startedAt === null || endedAt !== null}
+              // Auch nach "Eingriff beenden" lassen sich Phasen und Ereignisse
+              // nachtragen – sie werden häufig erst im Nachhinein dokumentiert.
+              disabled={startedAt === null}
               selected={selectedEventType}
               onSelect={(eventType) => {
                 setSelectedEventType((current) => toggleEventSelection(current, eventType));
@@ -1143,6 +1184,8 @@ function crosshairForMeasurement(
 }
 
 const WARNING_INFO_MAX_DISTANCE_PX = 22;
+// Kritischer Hinweis nur exakt am Messwert (bzw. auf dem Warnsymbol).
+const CRITICAL_HINT_HIT_PX = 10;
 
 /**
  * §4: Bedeutung der Warnung an der Zeigerposition – Kontrollzeit-Hinweis und/oder
@@ -1155,6 +1198,8 @@ function warningInfoAt(
   criticalWarnings: ReturnType<typeof deriveCriticalWarnings>,
   measurements: Measurement[],
   xScale: BandContext["xScale"],
+  yScales: BandContext["yScales"],
+  layout: BandContext["layout"],
 ): { lines: string[] } | null {
   const lines: string[] = [];
   const nearCheckpoint = checkpointWarnings.find(
@@ -1164,10 +1209,18 @@ function warningInfoAt(
     lines.push(`Kontrollzeit ${formatClock(nearCheckpoint.time)}`);
     for (const part of checkpointTooltip(nearCheckpoint).split("\n")) lines.push(part);
   }
+  // Kritischer Hinweis erscheint NUR direkt auf dem auslösenden Messwert bzw. auf
+  // dessen Warnsymbol – nicht schon, wenn der Stift in der Nähe vorbeizieht.
   for (const warning of criticalWarnings) {
     const measurement = measurements.find((item) => item.id === warning.measurementId);
     if (!measurement || measurement.kind !== crosshair.kind) continue;
-    if (Math.abs(timeToX(xScale, measurement.time) - crosshair.svgX) > WARNING_INFO_MAX_DISTANCE_PX) continue;
+    const markerX = timeToX(xScale, measurement.time);
+    const markerY = yScales[measurement.kind](measurement.kind === "nibp" ? measurement.mean : measurement.value);
+    const onMarker = Math.hypot(markerX - crosshair.svgX, markerY - crosshair.svgY) <= CRITICAL_HINT_HIT_PX;
+    const icon = criticalIconRect(markerX, markerY, layout.bandByKind[measurement.kind].top, layout.plotRight);
+    const onIcon = crosshair.svgX >= icon.x && crosshair.svgX <= icon.x + icon.width
+      && crosshair.svgY >= icon.y && crosshair.svgY <= icon.y + icon.height;
+    if (!onMarker && !onIcon) continue;
     lines.push("Kritischer Hinweis:");
     for (const reason of warning.reasons) lines.push(`• ${reason}`);
   }

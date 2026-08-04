@@ -33,6 +33,8 @@ function setup() {
     now: END,
     selectedId: null,
     dragPreview: null,
+    pointerTime: null,
+    armedId: null,
     onPointTap,
     onScalarDragMove: vi.fn(),
     onScalarDragEnd: vi.fn(),

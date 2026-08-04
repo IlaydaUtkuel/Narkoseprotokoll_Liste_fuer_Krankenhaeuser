@@ -6,6 +6,7 @@ import dayjs from "dayjs";
 import type { Dayjs } from "dayjs";
 import { formatClock } from "../../lib/timeline/format";
 import { timestampFromClockParts } from "../../lib/timeline/timeValidation";
+import { loadPatientData } from "../../lib/patient-storage";
 import { useCaseStore } from "../../store/anesthesiaCaseStore";
 
 export function EndControl() {
@@ -39,6 +40,7 @@ export function EndControl() {
         >
           Speichern und Schließen
         </Button>
+        <DiscardCaseButton />
         <Modal
           title="Endzeit bearbeiten"
           open={editing}
@@ -109,6 +111,46 @@ export function EndControl() {
         Eingriff beenden
       </Button>
     </Popconfirm>
+  );
+}
+
+/**
+ * Verwirft die gesamte OP-Dokumentation des aktuellen Falls, ohne sie zu speichern.
+ * Es wird niemals sofort geloescht: zuerst erscheint eine ausdrueckliche Rueckfrage
+ * mit dem Patientennamen. Abbrechen oder das X schliessen den Dialog, ohne etwas zu
+ * loeschen. Die Basisdaten des Patienten bleiben erhalten.
+ */
+function DiscardCaseButton() {
+  const resetCase = useCaseStore((state) => state.resetCase);
+  const [open, setOpen] = useState(false);
+  const patientName = loadPatientData()?.patientName?.trim();
+  const who = patientName ? `von ${patientName}` : "dieses Falls";
+  return (
+    <>
+      <Button className="discard-case-button" data-testid="discard-case" onClick={() => setOpen(true)}>
+        Alles löschen
+      </Button>
+      <Modal
+        title="OP-Daten wirklich löschen?"
+        open={open}
+        okText="Ja, endgültig löschen"
+        cancelText="Abbrechen"
+        okButtonProps={{ danger: true, "data-testid": "discard-case-confirm" } as never}
+        cancelButtonProps={{ "data-testid": "discard-case-cancel" } as never}
+        onCancel={() => setOpen(false)}
+        onOk={() => {
+          resetCase();
+          setOpen(false);
+        }}
+        destroyOnHidden
+      >
+        <Typography.Paragraph data-testid="discard-case-text">
+          Sind Sie sicher, dass Sie die OP-Daten {who} ohne Speichern endgültig löschen möchten?
+          Alle dokumentierten Vitalwerte, Medikamente, Infusionen sowie Phasen und Ereignisse
+          gehen dabei unwiderruflich verloren.
+        </Typography.Paragraph>
+      </Modal>
+    </>
   );
 }
 

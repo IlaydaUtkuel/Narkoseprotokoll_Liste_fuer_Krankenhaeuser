@@ -19,15 +19,6 @@ export function useBodyScrollLock(active: boolean): void {
   useEffect(() => {
     if (!active) return;
     lockBodyScroll();
-    const blockTouchScroll = (event: TouchEvent) => {
-      // Mehrfinger-Gesten (z. B. Zoom) bleiben erlaubt.
-      if (event.touches.length > 1) return;
-      if (event.cancelable) event.preventDefault();
-    };
-    window.addEventListener("touchmove", blockTouchScroll, { passive: false });
-    return () => {
-      window.removeEventListener("touchmove", blockTouchScroll);
-      unlockBodyScroll();
-    };
+    return () => unlockBodyScroll();
   }, [active]);
 }

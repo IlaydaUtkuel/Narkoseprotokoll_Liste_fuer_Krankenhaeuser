@@ -24,6 +24,8 @@ describe("Temperatur-Rendering", () => {
     const yScales = buildYScales(layout, domains);
     render(<svg><LineBand kind="temperature" measurements={measurements} testId="series-temperature" ctx={{
       layout, xScale, yScales, startedAt: start, now: start + 10_000, selectedId: null, dragPreview: null,
+    pointerTime: null,
+    armedId: null,
       onPointTap: () => {}, onScalarDragMove: () => {}, onScalarDragEnd: () => {}, onScalarDragCancel: () => {},
     }} /></svg>);
     for (let index = 0; index < values.length; index += 1) {

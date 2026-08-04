@@ -50,7 +50,8 @@ describe("sichere Basisdaten-Korrektur", () => {
     renderForm();
     const input = await screen.findByTestId("input-patientName");
     fireEvent.change(input, { target: { value: "Normal geändert" } });
-    expect(loadPatientData()?.patientName).toBe("Normal geändert");
+    // Namensteile beginnen automatisch gross (siehe formatPersonName).
+    expect(loadPatientData()?.patientName).toBe("Normal Geändert");
     expect(document.querySelector(".ant-modal:not(.ant-zoom-leave)")).toBeNull();
   });
 

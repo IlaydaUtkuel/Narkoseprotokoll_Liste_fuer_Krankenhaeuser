@@ -17,6 +17,11 @@ interface Result {
    * bereits im Formular; dieser Hook steuert nur die beruhigende Anzeige.
    */
   reportSaving: (field: string) => void;
+  /**
+   * Meldet, dass ein Feld sofort und endgueltig gespeichert wurde: zeigt ohne
+   * Verzoegerung "Gespeichert" (z.B. Umschalter, die keine Tipppause brauchen).
+   */
+  reportSaved: (field: string) => void;
   /** Meldet einen echten Schreibfehler fuer ein Feld. */
   reportError: (field: string) => void;
   /** Markiert Felder direkt als gespeichert (z.B. nach dem Laden aus localStorage). */
@@ -45,6 +50,15 @@ export function useDebouncedFieldSave({ delay = AUTOSAVE_DELAY_MS }: Options = {
     },
     [delay],
   );
+
+  const reportSaved = useCallback((field: string) => {
+    const existing = timers.current[field];
+    if (existing) {
+      clearTimeout(existing);
+      delete timers.current[field];
+    }
+    setStatuses((prev) => ({ ...prev, [field]: "saved" }));
+  }, []);
 
   const reportError = useCallback((field: string) => {
     const existing = timers.current[field];
@@ -79,5 +93,5 @@ export function useDebouncedFieldSave({ delay = AUTOSAVE_DELAY_MS }: Options = {
     };
   }, []);
 
-  return { statuses, reportSaving, reportError, markSaved, resetStatuses };
+  return { statuses, reportSaving, reportSaved, reportError, markSaved, resetStatuses };
 }

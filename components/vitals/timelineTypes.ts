@@ -26,6 +26,10 @@ export interface BandContext {
   now: number;
   selectedId: string | null;
   dragPreview: DragPreview | null;
+  /** Zeit unter dem Zeiger (für Anzeigen, die die aktuelle Stiftposition brauchen). */
+  pointerTime: number | null;
+  /** Messpunkt, der zum Verschieben ausgewählt ist (schwarzer Ring). */
+  armedId: string | null;
   onPointTap: (m: Measurement) => void;
   onScalarDragMove: (m: ScalarMeasurement, clientX: number, clientY: number) => void;
   onScalarDragEnd: (m: ScalarMeasurement) => void;

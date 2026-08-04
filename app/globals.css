@@ -634,6 +634,25 @@ body {
   stroke-dasharray: none;
 }
 
+/* Verwerfen-Aktion neben "Speichern und Schließen": kontraststarkes Rot (AA). */
+.discard-case-button.ant-btn {
+  color: #a8071a;
+  border-color: #a8071a;
+}
+
+.discard-case-button.ant-btn:hover,
+.discard-case-button.ant-btn:focus-visible {
+  color: #7a0510;
+  border-color: #7a0510;
+}
+
+/* Schwarzer Auswahlring eines Messpunkts: nur dieser Punkt folgt dem Stift. */
+.measurement-armed-ring {
+  fill: none;
+  stroke: #000000;
+  stroke-width: 2.5;
+}
+
 .nibp-mean-drag-preview {
   fill: var(--vital-nibp-dark);
   stroke: #ffffff;

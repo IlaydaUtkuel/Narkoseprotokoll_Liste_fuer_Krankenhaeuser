@@ -29,6 +29,7 @@ export function ScalarPointsLayer({ kind, points, ctx }: Props) {
         const cx = timeToX(ctx.xScale, time);
         const cy = yScale(value);
         const active = ctx.selectedId === m.id || preview !== null;
+        const armed = ctx.armedId === m.id;
         const ariaLabel = `${config.label} ${formatVitalNumber(kind, value)} ${config.unit} um ${formatClock(time)} bearbeiten`;
 
         const flipTooltip = cx + 120 > ctx.layout.plotRight;
@@ -51,6 +52,17 @@ export function ScalarPointsLayer({ kind, points, ctx }: Props) {
                 stroke="#ffffff"
                 strokeWidth={active ? 2 : 1.5}
               />
+              {/* Schwarzer Ring = zum Verschieben ausgewählt (nur nach Antippen). */}
+              {armed ? (
+                <circle
+                  cx={cx}
+                  cy={cy}
+                  r={11}
+                  className="measurement-armed-ring"
+                  data-testid={`point-armed-${m.id}`}
+                  pointerEvents="none"
+                />
+              ) : null}
             </MeasurementHit>
 
             {preview ? (

@@ -738,3 +738,285 @@ test("iPad R4 Story 6: aktiver NIBP-Griff ist schwarz, der andere weiss", async 
   // Nach dem Loslassen wieder weiss/inaktiv.
   expect(await activeStates()).toEqual({ systolic: "false", diastolic: "false" });
 });
+
+// ---- Runde 5: Vorschaukreis-Zeit, NIBP-Scroll, Nähe der Tooltips, Ereignisse nach OP-Ende,
+//      strikter kritischer Hinweis, ausgewählte Messpunkte ----
+
+// R5 Story 1: Jede Berührung im gestrichelten Kreis übernimmt exakt die gemerkte Uhrzeit.
+test("iPad R5 Story 1: jede Stelle im Vorschaukreis übernimmt dieselbe Uhrzeit", async ({ page }) => {
+  await seedStartedCase(page, 25);
+  for (const [lane, field, id] of [["medication", "medication-name", 810], ["infusion", "infusion-name", 830]] as const) {
+    const target = page.getByTestId(`lane-create-${lane}`);
+    const box = await target.boundingBox();
+    const y = box!.y + box!.height / 2;
+    const x = box!.x + box!.width * 0.18;
+    await tap(target, x, y, "pen", id);
+    await expect(page.getByTestId("preview-circle")).toBeVisible();
+    const pinned = ((await page.getByTestId("preview-coordinate").textContent()) ?? "").trim();
+    // Zweite Berührung deutlich versetzt, aber innerhalb des Kreises.
+    await tap(target, x + 17, y - 12, "pen", id + 1);
+    await expect(page.getByTestId(field)).toBeVisible();
+    const formTime = await page.evaluate(() => {
+      const el = document.querySelector('[data-testid="therapy-time"]');
+      const input = el?.tagName === "INPUT" ? el : el?.querySelector("input");
+      return (input as HTMLInputElement | null)?.value ?? "";
+    });
+    expect(formTime).toBe(pinned);
+    await page.getByTestId("therapy-cancel").click();
+    await expect(page.getByTestId(field)).toHaveCount(0);
+  }
+});
+
+// R5 Story 2: NIBP-Griffe ziehen sperrt den Seiten-Scroll.
+test("iPad R5 Story 2: Ziehen an Systolisch/Diastolisch scrollt die Seite nicht", async ({ page }) => {
+  await seedStartedCase(page, 20, [
+    { id: "n5", kind: "nibp", time: Date.now() - 15 * 60_000, systolic: 120, mean: 90, diastolic: 60, createdAt: Date.now(), updatedAt: Date.now() },
+  ]);
+  for (const [part, id] of [["systolic", 851], ["diastolic", 861]] as const) {
+    const handle = page.getByTestId(`nibp-handle-${part}`).locator('circle[role="button"]');
+    const box = await handle.boundingBox();
+    const x = box!.x + box!.width / 2;
+    const y = box!.y + box!.height / 2;
+    await page.evaluate(() => window.scrollTo(0, 120));
+    const before = await page.evaluate(() => window.scrollY);
+    await pointer(handle, "down", x, y, "pen", id);
+    expect(await page.evaluate(() => document.body.dataset.timelineScrollLock ?? "none")).toBe("true");
+    for (const dy of [-30, -60, 30, 70]) await pointer(handle, "move", x, y + dy, "pen", id);
+    expect(await page.evaluate(() => window.scrollY)).toBe(before);
+    await pointer(handle, "up", x, y + 70, "pen", id);
+    expect(await page.evaluate(() => document.body.dataset.timelineScrollLock ?? "none")).toBe("none");
+  }
+});
+
+// R5 Story 3: Koordinaten-/Info-Boxen erscheinen nahe am Stift.
+test("iPad R5 Story 3: Koordinate erscheint direkt beim Stift", async ({ page }) => {
+  await seedStartedCase(page, 20);
+  const area = page.getByTestId("timeline-create-area");
+  const band = await page.getByTestId("band-temperature").boundingBox();
+  const box = await area.boundingBox();
+  const x = box!.x + box!.width * 0.2;
+  const y = band!.y + band!.height / 2;
+  await pointer(area, "down", x, y, "pen", 871);
+  await pointer(area, "move", x + 6, y + 4, "pen", 871);
+  await expect(page.getByTestId("timeline-crosshair")).toBeVisible();
+  const distance = await page.evaluate(({ px, py }) => {
+    const r = document.querySelector('[data-testid="timeline-crosshair"] .crosshair-tooltip')!.getBoundingClientRect();
+    const dx = Math.max(r.left - px, 0, px - r.right);
+    const dy = Math.max(r.top - py, 0, py - r.bottom);
+    return Math.hypot(dx, dy);
+  }, { px: x + 6, py: y + 4 });
+  // Nahe am Stift (nicht am anderen Ende der Grafik).
+  expect(distance).toBeLessThan(90);
+  await pointer(area, "up", x + 6, y + 4, "pen", 871);
+});
+
+// R5 Story 4: Nach "Eingriff beenden" lassen sich Ereignisse weiterhin platzieren.
+test("iPad R5 Story 4: Phasen und Ereignisse auch nach OP-Ende platzierbar", async ({ page }) => {
+  const startedAt = Date.now() - 30 * 60_000;
+  await page.goto("/dokumentation");
+  await page.evaluate((started) => {
+    localStorage.setItem("sikant-anesthesia-demo-case:v1", JSON.stringify({
+      schemaVersion: 6, caseId: "r5-ended", caseRevision: 1, lastSuccessfullyExportedRevision: null,
+      startedAt: started, endedAt: started + 20 * 60_000,
+      measurements: [], medications: [], infusions: [], events: [], lastSavedAt: started,
+    }));
+  }, startedAt);
+  await page.reload();
+  await expect(page.getByTestId("case-ended")).toBeVisible();
+
+  const tool = page.getByTestId("select-event-incision");
+  await expect(tool).toBeEnabled();
+  await tool.click();
+  await expect(tool).toHaveAttribute("aria-pressed", "true");
+
+  const lane = page.getByTestId("lane-create-event");
+  const box = await lane.boundingBox();
+  const x = box!.x + box!.width * 0.15;
+  const y = box!.y + box!.height / 2;
+  await tap(lane, x, y, "pen", 881);
+  await tap(lane, x, y, "pen", 882);
+  await expect(page.getByTestId("event-incision")).toBeVisible();
+  const events = (await readCase(page)).events;
+  expect(events).toHaveLength(1);
+  expect(events[0].time).toBeLessThanOrEqual(startedAt + 20 * 60_000);
+});
+
+// R5 Story 5: Kritischer Hinweis nur exakt auf dem Messwert, nicht daneben.
+test("iPad R5 Story 5: kritischer Hinweis erscheint nur direkt auf dem Messwert", async ({ page }) => {
+  const startedAt = Date.now() - 20 * 60_000;
+  await page.goto("/dokumentation");
+  await page.evaluate((started) => {
+    localStorage.setItem("sikant-anesthesia-demo-case:v1", JSON.stringify({
+      schemaVersion: 6, caseId: "r5-crit", caseRevision: 1, lastSuccessfullyExportedRevision: null,
+      startedAt: started, endedAt: null,
+      measurements: [{ id: "c1", kind: "spo2", time: started + 5 * 60_000, value: 80, createdAt: started, updatedAt: started }],
+      medications: [], infusions: [], events: [], lastSavedAt: started,
+    }));
+    localStorage.setItem("sikant-critical-values:v1:r5-crit", JSON.stringify({
+      schemaVersion: 1, caseId: "r5-crit", birthDate: "", ageGroup: "adult", source: "custom", ageChangedNotice: false,
+      thresholds: { spo2Lower: 90, mapLower: 65, systolicLower: 90, systolicUpper: 180, diastolicUpper: 120, heartRateLower: 50, heartRateUpper: 150, temperatureLower: 36, temperatureUpper: 38.5, temperatureRiseDelta: 0.5, temperatureRiseWindowMinutes: 15 },
+    }));
+  }, startedAt);
+  await page.reload();
+  await expect(page.locator('[data-testid^="critical-warning-"]:not([data-testid="critical-warning-layer"])')).toHaveCount(1);
+
+  const area = page.getByTestId("timeline-create-area");
+  const marker = await page.locator('[data-testid^="point-spo2-"]').first().boundingBox();
+  const mx = marker!.x + marker!.width / 2;
+  const my = marker!.y + marker!.height / 2;
+
+  // Deutlich neben dem Messwert: KEIN kritischer Hinweis (andere Hinweise wie die
+  // Kontrollzeit dürfen dort weiterhin erscheinen).
+  await pointer(area, "move", mx + 90, my + 55, "pen", 891);
+  await expect(page.getByTestId("timeline-crosshair")).toBeVisible();
+  const asideText = (await page.getByTestId("warning-info").textContent().catch(() => "")) ?? "";
+  expect(asideText).not.toContain("Kritischer Hinweis");
+
+  // Genau auf dem Messwert: der Hinweis erscheint.
+  await pointer(area, "move", mx, my, "pen", 891);
+  await expect(page.getByTestId("warning-info")).toContainText("Kritischer Hinweis");
+});
+
+// R5 Story 6: Bestehende Punkte bewegen sich nur nach Auswahl (schwarzer Ring).
+test("iPad R5 Story 6: Messpunkt folgt dem Stift erst nach Antippen", async ({ page }) => {
+  const startedAt = Date.now() - 20 * 60_000;
+  await seedStartedCase(page, 20, [
+    { id: "pt1", kind: "spo2", time: startedAt + 5 * 60_000, value: 96, createdAt: startedAt, updatedAt: startedAt },
+  ]);
+  const area = page.getByTestId("timeline-create-area");
+  const pointBox = await page.locator('[data-testid^="point-spo2-"]').first().boundingBox();
+  const px = pointBox!.x + pointBox!.width / 2;
+  const py = pointBox!.y + pointBox!.height / 2;
+  const valueOf = async () => (await readCase(page)).measurements[0].value;
+  const original = await valueOf();
+
+  // 1) Ohne Auswahl: Darüberziehen verändert den Punkt NICHT und waehlt ihn nicht aus.
+  await pointer(area, "down", px, py, "pen", 901);
+  await pointer(area, "move", px + 5, py - 45, "pen", 901);
+  await pointer(area, "up", px + 5, py - 45, "pen", 901);
+  expect(await valueOf()).toBe(original);
+  await expect(page.getByTestId("point-armed-pt1")).toHaveCount(0);
+  await expect(page.getByTestId("entry-value")).toHaveCount(0);
+
+  // 2) Antippen (ohne Bewegung) waehlt den Punkt aus: schwarzer Ring, kein Formular.
+  await tap(area, px, py, "pen", 902);
+  await expect(page.getByTestId("point-armed-pt1")).toBeVisible();
+  await expect(page.getByTestId("entry-value")).toHaveCount(0);
+
+  // 3) Mit Auswahl folgt der Punkt dem Stift und wird gespeichert.
+  await pointer(area, "down", px, py, "pen", 903);
+  await pointer(area, "move", px, py - 40, "pen", 903);
+  await pointer(area, "up", px, py - 40, "pen", 903);
+  const moved = await valueOf();
+  expect(moved).not.toBe(original);
+  await expect(page.getByTestId("point-armed-pt1")).toBeVisible();
+
+  // 4) Erneutes Antippen hebt die Auswahl auf; danach bleibt der Wert fest.
+  const armedBox = await page.locator('[data-testid^="point-spo2-"]').first().boundingBox();
+  const ax = armedBox!.x + armedBox!.width / 2;
+  const ay = armedBox!.y + armedBox!.height / 2;
+  await tap(area, ax, ay, "pen", 904);
+  await expect(page.getByTestId("point-armed-pt1")).toHaveCount(0);
+  await pointer(area, "down", ax, ay, "pen", 905);
+  await pointer(area, "move", ax + 4, ay + 50, "pen", 905);
+  await pointer(area, "up", ax + 4, ay + 50, "pen", 905);
+  expect(await valueOf()).toBe(moved);
+});
+
+// R5 Story 7: "Alles löschen" neben "Speichern und Schließen" fragt vorher nach.
+test("iPad R5 Story 7: OP-Daten verwerfen erst nach Bestätigung", async ({ page }) => {
+  const startedAt = Date.now() - 30 * 60_000;
+  await page.goto("/dokumentation");
+  await page.evaluate((started) => {
+    localStorage.setItem("sikant-anesthesia-demo.patient-base-data.v1", JSON.stringify({
+      patientName: "Testperson Beispiel", birthDate: "01.01.2000", procedure: "Test-OP", operationDate: "01.08.2026",
+      bodyWeightKg: 70, weightUnit: "kg", asaClass: "II", mallampatiClass: "I", allergies: "keine",
+      noKnownAllergies: false, updatedAt: null,
+    }));
+    localStorage.setItem("sikant-anesthesia-demo-case:v1", JSON.stringify({
+      schemaVersion: 6, caseId: "r5-discard", caseRevision: 1, lastSuccessfullyExportedRevision: null,
+      startedAt: started, endedAt: started + 10 * 60_000,
+      measurements: [{ id: "m1", kind: "spo2", time: started + 60_000, value: 97, createdAt: started, updatedAt: started }],
+      medications: [], infusions: [], events: [], lastSavedAt: started,
+    }));
+  }, startedAt);
+  await page.reload();
+  await expect(page.getByTestId("case-ended")).toBeVisible();
+  await expect(page.getByTestId("save-close-case")).toBeVisible();
+
+  // Abbrechen löscht nichts.
+  await page.getByTestId("discard-case").click();
+  await expect(page.getByTestId("discard-case-text")).toContainText("Testperson Beispiel");
+  await page.getByTestId("discard-case-cancel").click();
+  expect((await readCase(page)).measurements).toHaveLength(1);
+
+  // Bestätigen verwirft den Fall.
+  await page.getByTestId("discard-case").click();
+  await page.getByTestId("discard-case-confirm").click();
+  await expect(page.getByTestId("start-button")).toBeVisible();
+  expect(await page.evaluate(() => localStorage.getItem("sikant-anesthesia-demo-case:v1"))).toBeNull();
+  // Basisdaten bleiben erhalten.
+  expect(await page.evaluate(() => localStorage.getItem("sikant-anesthesia-demo.patient-base-data.v1"))).not.toBeNull();
+});
+
+// R5 Story 8: Ereignis-Formular hat keinen "Alles Löschen"-Button (Entfernen genügt).
+test("iPad R5 Story 8: Ereignis-Formular ohne 'Alles Löschen'", async ({ page }) => {
+  await seedStartedCase(page, 20);
+  await page.getByTestId("select-event-extra").click();
+  const lane = page.getByTestId("lane-create-event");
+  const box = await lane.boundingBox();
+  const x = box!.x + box!.width * 0.15;
+  const y = box!.y + box!.height / 2;
+  await tap(lane, x, y, "pen", 921);
+  await tap(lane, x, y, "pen", 922);
+  await expect(page.getByTestId("event-comment")).toBeVisible();
+  await expect(page.getByTestId("therapy-clear-all")).toHaveCount(0);
+  await expect(page.getByTestId("therapy-delete")).toBeVisible();
+});
+
+// R5 Story 9: NIBP-Werte und Uhrzeit stehen in einem Textblock.
+test("iPad R5 Story 9: NIBP zeigt S/M/D und die Zeit in einem Block", async ({ page }) => {
+  await seedStartedCase(page, 20, [
+    { id: "n9", kind: "nibp", time: Date.now() - 15 * 60_000, systolic: 120, mean: 90, diastolic: 60, createdAt: Date.now(), updatedAt: Date.now() },
+  ]);
+  const handle = page.getByTestId("nibp-handle-systolic").locator('circle[role="button"]');
+  const box = await handle.boundingBox();
+  await pointer(handle, "down", box!.x + box!.width / 2, box!.y + box!.height / 2, "pen", 931);
+  const tooltip = page.locator('[data-testid^="nibp-values-"]');
+  await expect(tooltip).toContainText("S 120 · M 90 · D 60 mmHg");
+  await expect(tooltip).toContainText(/\d{2}:\d{2}:\d{2}/);
+  // Genau ein Kasten mit beiden Zeilen.
+  expect(await tooltip.locator("text").count()).toBe(2);
+  await pointer(handle, "up", box!.x + box!.width / 2, box!.y + box!.height / 2, "pen", 931);
+});
+
+// R5 Story 10: Der erste Eintrag der Einheitenliste (mL) ist per Tippen waehlbar.
+test("iPad R5 Story 10: erste Einheit (mL) laesst sich antippen und wird uebernommen", async ({ page }) => {
+  await seedStartedCase(page, 25);
+  // Formular deterministisch oeffnen: dieser Test prueft ausschliesslich die
+  // Einheitenliste. Der Zwei-Schritt-Ablauf (mit 3-Sekunden-Vorschau) ist in
+  // R5 Story 1 abgedeckt und wird hier bewusst nicht erneut durchlaufen.
+  await page.getByTestId("lane-create-infusion").press("Enter");
+  await expect(page.getByTestId("infusion-name")).toBeVisible();
+
+  const unit = page.getByTestId("infusion-unit");
+  await unit.click();
+  const dropdown = page.locator(".ant-select-dropdown:not(.ant-select-dropdown-hidden)").last();
+  await expect(dropdown).toBeVisible();
+  const firstOption = dropdown.locator('.ant-select-item-option[title="mL"]');
+  await expect(firstOption).toBeVisible();
+  // Sichtbar und gross genug, um mit dem Stift getroffen zu werden.
+  const optionBox = await firstOption.boundingBox();
+  expect(optionBox!.height).toBeGreaterThanOrEqual(24);
+  await firstOption.click();
+  await expect(unit).toContainText("mL");
+
+  // Wert speichern und pruefen, dass genau mL uebernommen wurde.
+  await page.getByTestId("infusion-name").fill("Ringer");
+  await page.getByTestId("infusion-amount").fill("500");
+  await page.getByTestId("therapy-duration").fill("10");
+  await page.getByTestId("therapy-save").click();
+  await expect(page.getByTestId("infusion-name")).toHaveCount(0);
+  const stored = (await readCase(page)).infusions[0];
+  expect(stored.unit.code).toBe("mL");
+});

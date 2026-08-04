@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { POINTER_MOVE_THRESHOLD_PX, VITAL_COLOR_VAR } from "../../lib/timeline/config";
 import { formatClock } from "../../lib/timeline/format";
 import { clampValue } from "../../lib/timeline/measurementUtils";
@@ -11,6 +11,7 @@ import {
 } from "../../lib/timeline/nibpDrag";
 import { timeToX, xToTime } from "../../lib/timeline/scales";
 import { clientToSvgPoint } from "../../lib/timeline/svgCoords";
+import { lockBodyScroll, unlockBodyScroll } from "../../lib/timeline/scrollLock";
 import { usePointerGesture } from "../../hooks/useTimelinePointer";
 import { MeasurementHit } from "./MeasurementHit";
 import type { BandContext } from "./timelineTypes";
@@ -126,6 +127,20 @@ function NibpHandles({
   // schwarz dargestellt und ist der einzige ziehbare; die anderen bleiben weiss und
   // nehmen keine Pointer-Events an. Wird bei up/cancel/lostpointercapture geleert.
   const [activeHandle, setActiveHandle] = useState<NibpHandleKey | null>(null);
+  // Während ein Griff angefasst ist, bleibt die Seite fixiert (iPad: kein Scrollen
+  // und kein Rubber-Band beim Ziehen von Systolisch/Mittel/Diastolisch).
+  const scrollLocked = useRef(false);
+  const holdPage = () => {
+    if (scrollLocked.current) return;
+    scrollLocked.current = true;
+    lockBodyScroll();
+  };
+  const releasePage = () => {
+    if (!scrollLocked.current) return;
+    scrollLocked.current = false;
+    unlockBodyScroll();
+  };
+  useEffect(() => () => releasePage(), []);
   const [meanPreview, setMeanPreview] = useState<{ mode: "time" | "mean"; time: number; mean: number } | null>(null);
   const meanPreviewRef = useRef<typeof meanPreview>(null);
   const meanDrag = useRef({ active: false, pointerId: -1, startX: 0, startY: 0, mode: null as "time" | "mean" | null });
@@ -239,8 +254,8 @@ function NibpHandles({
         isActive={activeHandle === "systolic"}
         // Solange ein anderer Griff aktiv ist, nimmt dieser keine Pointer-Events an.
         disabled={activeHandle !== null && activeHandle !== "systolic"}
-        onActivate={() => setActiveHandle("systolic")}
-        onRelease={() => setActiveHandle(null)}
+        onActivate={() => { holdPage(); setActiveHandle("systolic"); }}
+        onRelease={() => { releasePage(); setActiveHandle(null); }}
         onDragStart={(event) => { dragSnapshot.current = snapshot(); previewFromPointer("systolic", event); }}
         onPreview={(event) => previewFromPointer("systolic", event)}
         onCommit={() => commit("systolic")}
@@ -255,8 +270,8 @@ function NibpHandles({
         configured={shownDiastolic !== null}
         isActive={activeHandle === "diastolic"}
         disabled={activeHandle !== null && activeHandle !== "diastolic"}
-        onActivate={() => setActiveHandle("diastolic")}
-        onRelease={() => setActiveHandle(null)}
+        onActivate={() => { holdPage(); setActiveHandle("diastolic"); }}
+        onRelease={() => { releasePage(); setActiveHandle(null); }}
         onDragStart={(event) => { dragSnapshot.current = snapshot(); previewFromPointer("diastolic", event); }}
         onPreview={(event) => previewFromPointer("diastolic", event)}
         onCommit={() => commit("diastolic")}
@@ -280,18 +295,20 @@ function NibpHandles({
           meanDrag.current = { active: true, pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, mode: null };
           dragSnapshot.current = snapshot();
           try { event.currentTarget.setPointerCapture(event.pointerId); } catch { /* ignore */ }
+          holdPage();
           setActiveHandle("mean");
           setActive(true);
         }}
         onPointerMove={updateMeanPreview}
-        onPointerUp={(event) => { finishMeanDrag(event); setActiveHandle(null); }}
-        onLostPointerCapture={(event) => { finishMeanDrag(event); setActiveHandle(null); }}
+        onPointerUp={(event) => { finishMeanDrag(event); releasePage(); setActiveHandle(null); }}
+        onLostPointerCapture={(event) => { finishMeanDrag(event); releasePage(); setActiveHandle(null); }}
         onPointerCancel={(event) => {
           if (meanDrag.current.pointerId !== event.pointerId) return;
           meanDrag.current = { active: false, pointerId: -1, startX: 0, startY: 0, mode: null };
           meanPreviewRef.current = null;
           dragSnapshot.current = null;
           setMeanPreview(null);
+          releasePage();
           setActiveHandle(null);
           setActive(false);
         }}
@@ -307,14 +324,17 @@ function NibpHandles({
         <circle cx={cx} cy={yMean} r={6} className="nibp-handle nibp-handle--active" data-testid={`nibp-mean-active-${measurement.id}`} pointerEvents="none" />
       ) : null}
       {meanPreview ? <circle cx={cx} cy={yScale(shownMean)} r={6} className="nibp-mean-drag-preview" pointerEvents="none" /> : null}
-      {active || preview ? (
+      {active || preview || activeHandle !== null ? (
+        // Ein einziger Textblock: Werte oben, direkt darunter die Uhrzeit an der
+        // aktuellen Stiftposition (bzw. der Messzeit, wenn kein Zeiger aktiv ist).
         <g pointerEvents="none" data-testid={`nibp-values-${measurement.id}`}>
-          <rect x={tooltipX} y={tooltipY} width={240} height={42} rx={6} className="nibp-value-tooltip" />
-          <text x={tooltipX + 8} y={tooltipY + 15} className="nibp-value-tooltip__values">
-            S {shownSystolic ?? "–"} · M {shownMean} · D {shownDiastolic ?? "–"}
+          <rect x={tooltipX} y={tooltipY} width={240} height={32} rx={6} className="nibp-value-tooltip" />
+          <text x={tooltipX + 8} y={tooltipY + 14} className="nibp-value-tooltip__values">
+            S {shownSystolic ?? "–"} · M {shownMean} · D {shownDiastolic ?? "–"} mmHg
           </text>
-          <text x={tooltipX + 8} y={tooltipY + 29} className="nibp-value-tooltip__unit">mmHg · {formatClock(shownTime)}{differentLocalDate(measurement.time, shownTime) ? ` · ${formatLocalDate(shownTime)}` : ""}</text>
-          <text x={tooltipX + 8} y={tooltipY + 39} className="nibp-value-tooltip__unit">Horizontal: Zeit · Vertikal: Mittel</text>
+          <text x={tooltipX + 8} y={tooltipY + 26} className="nibp-value-tooltip__unit">
+            {formatClock(ctx.pointerTime ?? shownTime)}{differentLocalDate(measurement.time, shownTime) ? ` · ${formatLocalDate(shownTime)}` : ""}
+          </text>
         </g>
       ) : null}
     </g>
