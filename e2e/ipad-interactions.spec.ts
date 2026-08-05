@@ -1005,9 +1005,14 @@ test("iPad R5 Story 10: erste Einheit (mL) laesst sich antippen und wird ueberno
   await expect(dropdown).toBeVisible();
   const firstOption = dropdown.locator('.ant-select-item-option[title="mL"]');
   await expect(firstOption).toBeVisible();
-  // Sichtbar und gross genug, um mit dem Stift getroffen zu werden.
-  const optionBox = await firstOption.boundingBox();
-  expect(optionBox!.height).toBeGreaterThanOrEqual(24);
+  await expect(firstOption).toBeEnabled();
+  // Sichtbar und gross genug, um mit dem Stift getroffen zu werden. Ant Design
+  // blendet das Dropdown mit einer Skalierungsanimation ein; direkt nach
+  // "toBeVisible" kann die Trefferflaeche daher noch zusammengeschoben sein.
+  // Gemessen wird deshalb zustandsbasiert, bis die endgueltige Hoehe steht.
+  await expect
+    .poll(async () => (await firstOption.boundingBox())?.height ?? 0)
+    .toBeGreaterThanOrEqual(24);
   await firstOption.click();
   await expect(unit).toContainText("mL");
 
