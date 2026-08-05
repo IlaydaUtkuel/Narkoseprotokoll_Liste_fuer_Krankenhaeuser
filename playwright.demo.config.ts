@@ -8,15 +8,14 @@ const PORT = 3100;
 const BASE_URL = `http://localhost:${PORT}`;
 
 export default defineConfig({
+  // Nur die Demoaufnahmen; die Standard-Suite unter ./e2e bleibt unberuehrt.
   testDir: "./e2e-demo",
-  // Ausschliesslich der Demoablauf – kein anderer Test darf hier mitlaufen.
-  testMatch: "narkoseprotokoll-demo.spec.ts",
   outputDir: "./demo-artifacts",
   fullyParallel: false,
   workers: 1,
   retries: 0,
   // Das Video laeuft bewusst langsam ab; das Zeitbudget ist entsprechend grosszuegig.
-  timeout: 10 * 60_000,
+  timeout: 4 * 60_000,
   expect: { timeout: 15_000 },
   reporter: [["list"]],
   use: {

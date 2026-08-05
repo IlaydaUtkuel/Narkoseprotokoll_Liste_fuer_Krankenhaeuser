@@ -11,7 +11,11 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
-    "test:e2e:demo-video": "playwright test --config=playwright.demo.config.ts",
+    "test:e2e:demo-video": "playwright test --config=playwright.demo.config.ts e2e-demo/narkoseprotokoll-demo.spec.ts && node scripts/collect-demo-videos.mjs",
+    "test:e2e:demo:basisdaten": "playwright test --config=playwright.demo.config.ts e2e-demo/01-basisdaten-vitalwerte.spec.ts && node scripts/collect-demo-videos.mjs",
+    "test:e2e:demo:therapien": "playwright test --config=playwright.demo.config.ts e2e-demo/02-therapien-ereignisse.spec.ts && node scripts/collect-demo-videos.mjs",
+    "test:e2e:demo:abschluss": "playwright test --config=playwright.demo.config.ts e2e-demo/03-abschluss-export.spec.ts && node scripts/collect-demo-videos.mjs",
+    "test:e2e:demo-videos": "playwright test --config=playwright.demo.config.ts e2e-demo/01-basisdaten-vitalwerte.spec.ts e2e-demo/02-therapien-ereignisse.spec.ts e2e-demo/03-abschluss-export.spec.ts && node scripts/collect-demo-videos.mjs",
     "generate-icons": "node scripts/generate-icons.mjs"
   },
   "dependencies": {
