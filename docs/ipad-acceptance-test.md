@@ -1,6 +1,7 @@
 # Manuelle Abnahme auf iPad und mit Apple Pencil
 
-**Status: Noch nicht auf physischer Hardware durchgeführt**
+**Status: Kernabläufe von der Auftraggeberin auf einem physischen iPad geprüft; die
+unten einzeln aufgeführten Restpunkte sind weiterhin offen.**
 
 Die zweistufige Stift-/Finger-Interaktion (Vorschau → Bestätigung), der unabhängige
 NIBP-Griff-Drag, die Scroll-Trennung und die Drawer-Platzierung sind durch
@@ -11,6 +12,30 @@ Chromium-Viewport** und ersetzen **weder Mobile Safari noch ein physisches iPad
 oder einen Apple Pencil**. Hover-Verhalten des Apple Pencil, die echte
 Safari-Adressleiste, die Bildschirmtastatur und das Rubber-Band-Scrolling lassen
 sich nur auf echter Hardware final verifizieren.
+
+## Auf physischer Hardware geprüft (Auftraggeberin)
+
+Die folgenden Abläufe wurden von der Auftraggeberin manuell auf einem physischen
+iPad geprüft und als funktionierend zurückgemeldet:
+
+| Ablauf | Status |
+| --- | --- |
+| Vitalwerte hinzufügen | Bestanden |
+| Vitalwerte verschieben | Bestanden |
+| Systolischen und diastolischen NIBP-Wert ziehen | Bestanden |
+| Medikamente hinzufügen | Bestanden |
+| Infusionen hinzufügen | Bestanden |
+| Drawer-Verhalten ohne unerwünschtes Seitenscrollen | Bestanden |
+| Scrollverhalten bei Finger- und Pencil-Interaktionen | Bestanden |
+| Ereignisse hinzufügen | Bestanden |
+| Ereignisse korrigieren | Bestanden |
+| Persistence nach einem Reload | Bestanden |
+| Export- beziehungsweise Files-Ablauf | Bestanden |
+
+Nicht dokumentiert sind das verwendete Gerätemodell, die iPadOS- und
+Browserversion sowie das Apple-Pencil-Modell. Diese Angaben und die unten noch
+mit `Nicht getestet` markierten Zeilen bleiben offen. Aussagen über eine
+bestimmte Browser-Engine werden hier bewusst nicht getroffen.
 
 ## Testdaten
 
@@ -67,24 +92,24 @@ Reproduktionsschritte gehören in `Bemerkung`.
 | 8 | Kontakt weit entfernt: alter Marker verschwindet, neuer entsteht, kein Formular | Nicht getestet |  |
 | 9 | Ohne zweiten Kontakt: Marker verschwindet nach ca. 3 Sekunden | Nicht getestet |  |
 | 10 | Dasselbe mit dem Finger (Touch) statt Pencil | Nicht getestet |  |
-| 11 | SpO₂, Herzfrequenz, NIBP und Temperatur je einmal per Zwei-Schritt anlegen | Nicht getestet |  |
-| 12 | NIBP: Systolisch-Griff ziehen – Mittel und Diastolisch bleiben unverändert | Nicht getestet |  |
-| 13 | NIBP: Diastolisch-Griff ziehen – Systolisch und Mittel bleiben unverändert | Nicht getestet |  |
+| 11 | SpO₂, Herzfrequenz, NIBP und Temperatur je einmal per Zwei-Schritt anlegen | Bestanden | Auftraggeberin, physisches iPad |
+| 12 | NIBP: Systolisch-Griff ziehen – Mittel und Diastolisch bleiben unverändert | Bestanden | Auftraggeberin, physisches iPad |
+| 13 | NIBP: Diastolisch-Griff ziehen – Systolisch und Mittel bleiben unverändert | Bestanden | Auftraggeberin, physisches iPad |
 | 14 | NIBP: Mittel-Griff ziehen (vertikal Wert, horizontal Zeit) | Nicht getestet |  |
 | 15 | NIBP: Griffe liegen dicht beieinander – der beabsichtigte Griff wird getroffen | Nicht getestet |  |
-| 16 | Während NIBP-Drag scrollt die Seite nicht; kein Formular öffnet sich | Nicht getestet |  |
-| 17 | Medikamenten-Lane: erster Kontakt = kesik Linie, zweiter Kontakt = Formular | Nicht getestet |  |
-| 18 | Infusions-Lane: erster Kontakt = kesik Linie, zweiter Kontakt = Infusions-Formular | Nicht getestet |  |
-| 19 | Ereignis-Symbol wählen, Lane antippen = Geist, zweiter Kontakt = Platzierung | Nicht getestet |  |
+| 16 | Während NIBP-Drag scrollt die Seite nicht; kein Formular öffnet sich | Bestanden | Auftraggeberin, physisches iPad |
+| 17 | Medikamenten-Lane: erster Kontakt = kesik Linie, zweiter Kontakt = Formular | Bestanden | Auftraggeberin, physisches iPad |
+| 18 | Infusions-Lane: erster Kontakt = kesik Linie, zweiter Kontakt = Infusions-Formular | Bestanden | Auftraggeberin, physisches iPad |
+| 19 | Ereignis-Symbol wählen, Lane antippen = Geist, zweiter Kontakt = Platzierung | Bestanden | Auftraggeberin, physisches iPad |
 | 20 | Ereignis-Linie schneidet alle Vitalgrafiken an derselben X-Position | Nicht getestet |  |
-| 21 | Auf der Grafik bewegen: Seite scrollt nicht; am linken Rand/ausserhalb scrollt sie | Nicht getestet |  |
-| 22 | Formular öffnet als unterer Drawer, vollständig sichtbar, Seite springt nicht | Nicht getestet |  |
+| 21 | Auf der Grafik bewegen: Seite scrollt nicht; am linken Rand/ausserhalb scrollt sie | Bestanden | Auftraggeberin, physisches iPad |
+| 22 | Formular öffnet als unterer Drawer, vollständig sichtbar, Seite springt nicht | Bestanden | Auftraggeberin, physisches iPad |
 | 23 | Bildschirmtastatur öffnet: aktives Feld sichtbar, Speichern/Abbrechen erreichbar | Nicht getestet |  |
 | 24 | Formular schließen: Seite kehrt an die vorherige Scroll-Position zurück | Nicht getestet |  |
 | 25 | Safari-Adressleiste ein-/ausblenden: Drawer bleibt korrekt positioniert | Nicht getestet |  |
 | 26 | Orientierungswechsel (Portrait ↔ Landscape) während einer Interaktion | Nicht getestet |  |
 | 27 | Langes Drücken erzeugt kein Kontextmenü / keine Textauswahl auf der Grafik | Nicht getestet |  |
-| 28 | Reload: echte Werte bleiben erhalten; keine Vorschau-Marker im Export | Nicht getestet |  |
+| 28 | Reload: echte Werte bleiben erhalten; keine Vorschau-Marker im Export | Bestanden | Auftraggeberin, physisches iPad |
 | 29 | Keine sichtbare UI-Fehlermeldung und kein Fehler im Safari Web Inspector | Nicht getestet |  |
 | 30 | Medikament/Infusion: gestrichelter Vorschaukreis, kein „+“; Kontakt irgendwo im Kreis wählt die Zeit | Nicht getestet |  |
 | 31 | Neue Berührung lässt die alte Vorschau sofort verschwinden (nie zwei gleichzeitig) | Nicht getestet |  |
@@ -97,12 +122,16 @@ Reproduktionsschritte gehören in `Bemerkung`.
 | 38 | Checkpoint-NIBP: Systolisch/Mittel/Diastolisch einzeln inline, keine automatische Schätzung | Nicht getestet |  |
 | 39 | Checkpoint-Modus: X-Position der Berührung ändert die gespeicherte Zeit nicht | Nicht getestet |  |
 | 40 | Checkpoint erneut tippen beendet den Modus; nach Vollständigkeit schließt er selbst | Nicht getestet |  |
+| 41 | Bestehende Vitalwerte auf der Zeitachse verschieben | Bestanden | Auftraggeberin, physisches iPad |
+| 42 | Bestehende Ereignisse korrigieren | Bestanden | Auftraggeberin, physisches iPad |
+| 43 | Export- beziehungsweise Files-Ablauf auf dem Gerät | Bestanden | Auftraggeberin, physisches iPad |
 
 ## Abschluss
 
-Gesamtergebnis: **Nicht getestet**
+Gesamtergebnis: **Teilweise geprüft** – die oben aufgeführten Kernabläufe sind auf
+einem physischen iPad bestanden; die verbleibenden Zeilen sind offen.
 
-Verwendetes Gerät / Apple-Pencil-Modell:
+Verwendetes Gerät / Apple-Pencil-Modell (nicht dokumentiert):
 
 ```text
 

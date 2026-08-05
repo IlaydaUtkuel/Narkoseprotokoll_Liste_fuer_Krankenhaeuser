@@ -1,6 +1,6 @@
 # Agentischer Entwicklungsworkflow
 
-Dieses Dokument beschreibt fünf nachvollziehbare Entwicklungs- und Korrekturschleifen des Repositories. Grundlage sind die vorhandene Git-Historie, die aktuelle Implementierung, Tests und konkrete menschliche Rückmeldungen. Es werden keine erfundenen Agentengespräche oder externen Arbeitsschritte behauptet.
+Dieses Dokument beschreibt sechs nachvollziehbare Entwicklungs- und Korrekturschleifen des Repositories. Grundlage sind die vorhandene Git-Historie, die aktuelle Implementierung, Tests und konkrete menschliche Rückmeldungen. Es werden keine erfundenen Agentengespräche oder externen Arbeitsschritte behauptet.
 
 Agentisches Coding unterstützt Analyse, Implementierung und wiederholte Verifikation. Es ersetzt weder die menschliche Produktentscheidung noch die medizinische Bewertung, die reale Hardwareabnahme oder die Freigabe einer Auslieferung.
 
@@ -158,6 +158,23 @@ Verworfen wurde die Sichtbarkeitsprüfung der Therapie-Intervalllinie über `toB
 
 Das zuvor erzeugte Video wurde vor der Neuaufnahme gelöscht, damit keine veraltete Aufzeichnung mit getippten Werten in die Abgabe gerät.
 
+### Nachtrag: drei fokussierte Kurzaufnahmen
+
+Zur Gesamtaufnahme kamen drei kurze Videos hinzu (`e2e-demo/01-basisdaten-vitalwerte.spec.ts`,
+`02-therapien-ereignisse.spec.ts`, `03-abschluss-export.spec.ts`). Die gemeinsamen
+Bausteine liegen seither in `e2e-demo/demo-helpers.ts`.
+
+Dabei traten zwei weitere reproduzierbare Fehlerbilder auf. Erstens lag die
+Messfahrt der Helfer stets rund eine Minute links der Jetzt-Linie – genau dort,
+wo nach einer Dokumentation zur Kontrollzeit bereits ein NIBP-Griff sitzt. Der
+Griff fing den Zeigerkontakt ab, wodurch im Kontrollzeit-Modus keine Koordinate
+erschien. Die Messfahrt weicht jetzt allen bedienbaren Stellen des Bandes aus.
+Zweitens öffnet die Anwendung die Kontrollseite bewusst in einem neuen Tab;
+Playwright zeichnet pro Seite ein eigenes Video auf, sodass der Abschluss in einer
+zweiten Datei landete. Verworfen wurde deshalb die Aufnahme über den Popup-Tab –
+für die Aufzeichnung wird beim Klick lediglich das `target`-Attribut des Links
+entfernt, während Schaltfläche, Route und Exportlogik unverändert bleiben.
+
 ### Automatisierte Verifikation
 
 `e2e-demo/narkoseprotokoll-demo.spec.ts` läuft über `npm run test:e2e:demo-video` mit einer eigenen Konfiguration (`playwright.demo.config.ts`, ein Chromium-Projekt, `workers: 1`, `retries: 0`, `video: "on"`). Der Test prüft unter anderem, dass im Kontrollzeit-Modus kein Formular öffnet, dass eine Ziehbewegung kein Formular öffnet, dass das kritische Warnsymbol im DOM vor den Griffen liegt und seinen eigenen Messpunkt nicht überdeckt, und dass der Fall auf der Kontrollseite noch nicht archiviert ist.
@@ -197,6 +214,44 @@ Verworfen wurde ein größeres Onboarding mit mehreren Schritten. Gefordert war 
 ### Ergebnis
 
 Ein leerer Fall benennt den nächsten Schritt, ohne den Hauptablauf oder die Darstellung der Zeitachse zu verändern.
+
+## Loop 6 – Flakiger Dropdown-Test
+
+### Ausgangsproblem
+
+Im vollständigen Playwright-Lauf schlug `iPad R5 Story 10: erste Einheit (mL) laesst sich antippen und wird uebernommen` gelegentlich fehl, während derselbe Test einzeln und dateiweise zuverlässig bestand.
+
+### Anforderung
+
+Der Test soll dieselbe fachliche Aussage prüfen – der erste Eintrag der Einheitenliste ist gross genug und per Tippen wählbar – aber nicht mehr vom Zufall abhängen.
+
+### Agentischer Umsetzungsschritt
+
+Die Fehlermeldung `expect(optionBox!.height).toBeGreaterThanOrEqual(24)` mit dem Wert `0` wies auf eine Messung während der Einblendanimation von Ant Design hin. Die Höhe wird seither zustandsbasiert über `expect.poll` gemessen, zusätzlich wird die Option vorher auf Sichtbarkeit und Bedienbarkeit geprüft.
+
+### Menschliche Prüfung
+
+Die Rückmeldung verlangte ausdrücklich eine echte Stabilisierung statt eines Vermerks „bekannt flakig“.
+
+### Erkannte Schwachstelle
+
+`toBeVisible()` beweist nur, dass ein Element sichtbar ist – nicht, dass seine Geometrie bereits final ist. Eine einmalige Messung direkt danach greift der Animation vor.
+
+### Verworfen
+
+Verworfen wurde, den Fehlschlag als bekannten flakigen Test zu dokumentieren und stehenzulassen.
+
+Ebenso verworfen wurden alle Varianten, die das Symptom verdecken statt es zu beheben: den Test überspringen, die Schwelle von 24 px senken, die Assertion entfernen oder `retries` erhöhen. Der geprüfte Ablauf und der Grenzwert sind unverändert geblieben.
+
+Verworfen wurde auch ein fester Wartezeitraum vor der Messung; er wäre auf langsameren Rechnern erneut zu kurz.
+
+### Automatisierte Verifikation
+
+Datei einzeln je Projekt (35/35 und 35/35), beide Projekte vollständig (83/83 und 83/83) sowie der komplette Lauf `npm run test:e2e` mit 166/166 bestandenen Tests.
+
+### Ergebnis
+
+Die Standard-Suite ist vollständig grün, ohne dass eine Prüfung entfernt oder abgeschwächt wurde.
 
 ## Grenzen der agentischen Verifikation
 

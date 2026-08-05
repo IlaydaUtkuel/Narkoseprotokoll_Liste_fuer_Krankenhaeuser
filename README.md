@@ -1,353 +1,176 @@
 # Sikant Narkoseprotokoll-Demo
 
-Lokale Next.js-Anwendung zur Dokumentation eines ausschließlich **fiktiven** Narkosefalls. Die Anwendung verbindet Basisdaten, eine gemeinsame SVG-Zeitachse für vier Vitalparameter, Therapien und Ereignisse sowie einen kontrollierten Fallabschluss mit echtem JSON-Dateiexport.
+Lokale Next.js-Anwendung zur Dokumentation eines ausschließlich **fiktiven** Narkosefalls: Basisdaten, eine gemeinsame SVG-Zeitachse für vier Vitalparameter, Therapien und Ereignisse sowie ein kontrollierter Fallabschluss mit echtem JSON-Export.
 
-> **Wichtiger Hinweis:** Diese Demo ist kein Medizinprodukt und enthält keine Diagnose-, Therapie- oder Dosierungsempfehlung. Kritische Hinweise und Vollständigkeitsmeldungen werden ausschließlich aus den eingegebenen Daten und der vorhandenen Konfiguration abgeleitet. Für die Demo dürfen keine realen Patientendaten verwendet werden.
+> **Kein Medizinprodukt.** Die Demo enthält keine Diagnose-, Therapie- oder Dosierungsempfehlung. Kritische Hinweise und Vollständigkeitsmeldungen werden ausschließlich aus den eingegebenen Daten und der vorhandenen Konfiguration abgeleitet. Es dürfen **keine realen Patientendaten** verwendet werden; alle Daten bleiben lokal im Browser.
 
-## Voraussetzungen
+## Voraussetzungen und lokaler Start
 
-- Node.js 20 oder neuer
-- npm
-- Chromium für die automatisierten Playwright-Tests
-
-## Installation
+Node.js 20 oder neuer, npm, Chromium für die Playwright-Tests.
 
 ```bash
 npm ci
 npx playwright install chromium
+npm run dev          # Entwicklung: http://localhost:3000
 ```
 
-## Lokaler Start
-
-Entwicklung:
-
-```bash
-npm run dev
-```
-
-Danach ist die Anwendung unter [http://localhost:3000](http://localhost:3000) erreichbar.
-
-## Build
+Produktionsstand (der Serwist-Service-Worker entsteht nur im webpack-Build, im Dev-Modus ist er deaktiviert):
 
 ```bash
 npm run build
 npm run start
 ```
 
-Der Build verwendet bewusst webpack, weil der Serwist-Service-Worker damit erzeugt wird. Der Service Worker ist im Entwicklungsmodus deaktiviert.
+## Zentrale Funktionen
 
-## Tests
+- **Basisdaten** mit Datumsvalidierung, Sofort-Persistence und `Keine Allergien`-Umschalter.
+- **Gemeinsame Zeitachse** für SpO₂, Herzfrequenz, NIBP und Temperatur sowie für Medikamente, Infusionen, Phasen und Ereignisse – alles auf derselben Zeitkoordinate.
+- **Werte per Zeiger dokumentieren:** Ein Klick in ein Band erzeugt Zeit und Wert aus der Zeigerposition; bestehende Punkte lassen sich ziehen. NIBP besteht aus Mittelwert plus getrennt ziehbaren systolischen und diastolischen Griffen.
+- **Kontrollzeit-Modus:** Ab `startedAt + 5 Minuten` markiert die Anwendung unvollständige Fünf-Minuten-Kontrollpunkte. Ein Klick auf das Warnsymbol fixiert die Zeitposition, sodass nur noch die Höhe den Wert bestimmt – ohne Formular.
+- **Sechs Ereignistypen** (`Beginn Anästhesie`, `Schnitt`, `Naht`, `Ende Ausleitung`, `Patient aus dem Saal`, `Extra` mit Kommentar), mehrfach platzierbar, verschieb- und löschbar.
+- **Kritische Hinweise** aus konfigurierbaren, altersabhängigen Schwellen – als sichtbare Orientierung, nicht als klinische Bewertung.
+- **Leerer Fall** zeigt unterhalb der Grafik einen kurzen Hinweis auf den nächsten Schritt; er verschwindet mit dem ersten Eintrag.
+- **Fiktiver Demofall** per Klick, dauerhaft als `FIKTIVER DEMOFALL` gekennzeichnet.
+- **Kontrollierter Abschluss** mit Vollständigkeitsprüfung und echtem Dateiexport.
+
+## Architekturüberblick
+
+Clientseitige Next.js-Anwendung mit React und TypeScript. Ant Design liefert Formulare, Dialoge und Drawer; die interaktive Zeitachse ist eine eigene SVG-Oberfläche.
+
+- `/` erfasst und validiert die Basisdaten.
+- `/dokumentation` enthält die gemeinsame Zeitachse.
+- `/abschluss` zeigt nach dem Fallende eine schreibgeschützte Kontrolle, die Vollständigkeitsprüfung und den Export.
+
+Die fachliche Logik für Koordinaten, Skalen, Warnungen, Vollständigkeit und Persistence liegt getrennt von der Darstellung in `lib/` und ist dadurch unit-testbar. Es gibt kein Backend, kein Benutzerkonto und keine Synchronisation.
+
+## Datenmodell
+
+Ein Fall besteht aus **Basisdaten** (Patient/-in, Geburtsdatum, Eingriff, OP-Datum, Gewicht und Einheit, ASA, Mallampati, Allergien), **Fallstatus** (Fall-ID, `startedAt`, optionales `endedAt`, Schema-, Fall- und Exportrevision), **Vitalmessungen**, **Therapien** und **Ereignissen**.
+
+SpO₂, Herzfrequenz und Temperatur sind Einzelwerte mit Zeitpunkt. Eine NIBP-Messung fasst systolisch, Mittelwert und diastolisch zu **einem** Datensatz mit gemeinsamem Zeitpunkt zusammen. Therapien tragen Bezeichnung, Beginn, Dosis oder Menge, strukturierte Einheit, Anwendungsart und entweder ein Ende oder den Status `ongoing`.
+
+Kritische Warnungen, Fünf-Minuten-Hinweise und Vollständigkeitsergebnisse werden **nicht** gespeichert, sondern bei jeder Anzeige neu aus den Falldaten berechnet.
+
+## Zuordnung von Pointer-Koordinaten
+
+Pointer-Ereignisse liefern Fensterkoordinaten. Diese werden zunächst in das lokale SVG-Koordinatensystem überführt, damit Scrollposition und responsive Größe berücksichtigt werden. Die X-Koordinate wird proportional auf den sichtbaren Zeitbereich abgebildet (linker Rand = Beginn, rechter Rand = Ende), die Y-Koordinate über die aktive Y-Skala des jeweiligen Bandes in einen Messwert zurückgerechnet – parameterspezifisch, da jedes Band eine eigene, aus den vorhandenen Daten abgeleitete Skala besitzt. Ergebnisse werden auf die Genauigkeit des Parameters gerundet; Positionen außerhalb der Zeichenfläche werden begrenzt oder verworfen.
+
+Bei NIBP behalten alle drei Werte denselben Zeitpunkt, auch wenn systolischer und diastolischer Griff einzeln gezogen werden. Unit-Tests prüfen die Umrechnung für verschiedene Positionen und Größen; die Demo-Tests vergleichen zusätzlich die angezeigte Koordinate mit dem tatsächlich gespeicherten Wert.
+
+## Persistence und Export
+
+Basisdaten und Falldokumentation werden sofort nach jeder abgeschlossenen Änderung in `localStorage` geschrieben; die 600-ms-Verzögerung betrifft nur den sichtbaren Wechsel zu `✓ Gespeichert`. Die aktuelle Fall-Schema-Version ist **6**; ältere Stände ab Version 1 werden beim Laden migriert. Beschädigtes JSON wird nicht still überschrieben.
+
+Nach dem Fallende zeigt `/abschluss` Basisdaten, eine schreibgeschützte Timeline-Vorschau und die Vollständigkeitsprüfung, danach Dateiauswahl und letzte Bestätigung. Je nach Browser wird die JSON-Datei über die File System Access API in einen gewählten Ordner geschrieben, über Web Share angeboten oder als Download bereitgestellt. Erst ein tatsächlich erfolgreicher Schreibweg archiviert und schließt den Fall; ein Abbruch verändert nichts. Kritische Schwellen sind bewusst **nicht** Teil des Exports.
+
+## Tests und verifizierter Endstand
 
 ```bash
+npm run typecheck
 npm run lint
 npm run test
 npm run build
 npm run test:e2e
 ```
 
-`npm run test:e2e` startet den zuvor gebauten Produktionsstand auf Port 3100. Die Standardkonfiguration enthält ein Desktop-Projekt mit Chromium bei 1280 × 800 und ein iPad-nahes Chromium-Projekt bei 810 × 1080 mit Touch-Unterstützung.
+`npm run test:e2e` startet den zuvor gebauten Produktionsstand auf Port 3100 und führt zwei Projekte aus: `chromium` (Desktop, 1280 × 800) und `ipad-viewport` (810 × 1080 mit Touch). Einzeln über `npx playwright test --project=<name>`.
 
-Der iPad-nahe Test verwendet auf dem aktuellen Windows-System Chromium. Er ersetzt keine Prüfung mit Mobile Safari, iPadOS oder einem physischen Apple Pencil.
+Verifiziert am 05.08.2026 auf dem finalen Commit:
 
-Die endgültigen Testzahlen werden nicht manuell geschätzt, sondern vor der Abgabe aus den tatsächlichen Ausgaben der folgenden Befehle übernommen:
+| Prüfung | Ergebnis |
+| --- | --- |
+| `npm run typecheck` | bestanden |
+| `npm run lint` | bestanden |
+| `npm run test` | 297 Tests in 53 Dateien bestanden |
+| `npm run build` | bestanden |
+| `npx playwright test --project=chromium` | 83/83 |
+| `npx playwright test --project=ipad-viewport` | 83/83 |
+| `npm run test:e2e` | 166/166 |
+| `npm run test:e2e:demo-videos` | 3/3 |
+| `npm run test:e2e:demo-video` | 1/1 |
 
-```bash
-npm run test
-npx playwright test --list
-```
-(Aktueller verifizierter Teststand nach dem letzten Commit: noch einzutragen.)
-
-Ein separater TypeScript-Check darf hier nur ergänzt werden, wenn dafür tatsächlich ein ausführbarer Befehl im Projekt vorhanden ist und dieser erfolgreich ausgeführt wurde.
+Das iPad-Projekt läuft auf diesem Windows-Host mit Chromium und ersetzt keine Prüfung mit WebKit oder auf echter Hardware.
 
 ## Playwright-Demo-Videos
-(Die Playwright-Demo-Videos wurden noch nicht erstellt.)
 
-Nach der Erstellung müssen hier dokumentiert werden:
+Alle Aufnahmen stammen aus erfolgreichen Testläufen, zeigen einen sichtbaren Mauszeiger und wurden anhand gerenderter Einzelbilder visuell geprüft. Vitalwerte werden darin nie eingetippt, sondern ausschließlich aus der Zeigerposition erzeugt.
 
-- der genaue Speicherort der Videos,
-- der Befehl zur erneuten Erzeugung,
-- die zugehörigen Playwright-Tests,
-- der geprüfte Git-Commit,
-- eine kurze Beschreibung des in jedem Video dargestellten Benutzerablaufs.
+| Video | Ablauf | Befehl | Status |
+| --- | --- | --- | --- |
+| `docs/videos/00-gesamtablauf.webm` | Gesamter Ablauf von den Basisdaten bis zur Kontrollseite (2:15 min) | `npm run test:e2e:demo-video` | bestanden |
+| `docs/videos/01-basisdaten-vitalwerte-persistence.webm` | Basisdaten, Start, Temperatur und NIBP per Klick, Griffe ziehen, Kontrollzeit-Modus, Persistence nach Reload (0:54 min) | `npm run test:e2e:demo:basisdaten` | bestanden |
+| `docs/videos/02-therapien-ereignisse-bearbeiten.webm` | Medikament, Infusion und Ereignis anlegen, bearbeiten, auf der Zeitachse verschieben, löschen, Therapie-Tooltips (0:29 min) | `npm run test:e2e:demo:therapien` | bestanden |
+| `docs/videos/03-abschluss-kontrolle-export.webm` | Kritischer Wert mit Hinweis, Korrektur per Ziehen, Fall beenden, Kontrollseite, Export mit Prüfung der JSON-Datei (0:34 min) | `npm run test:e2e:demo:abschluss` | bestanden |
 
-Die Videos müssen erfolgreiche Hauptabläufe zeigen und dürfen nicht nur bei fehlgeschlagenen Tests erzeugt werden.
+`npm run test:e2e:demo-videos` erzeugt die drei kurzen Aufnahmen nacheinander. Die zugehörigen Tests liegen in `e2e-demo/` und laufen über `playwright.demo.config.ts`, getrennt von der Standard-Suite.
 
-(Geplanter Videoordner: nach der tatsächlichen Umsetzung eintragen.)
+Im Abschluss-Video wird ausschließlich der native Ordnerdialog (`window.showDirectoryPicker`) gemockt; beide Schaltflächen werden sichtbar geklickt, und Validierung, Exporterzeugung sowie Dateiname und JSON-Inhalt werden real geprüft.
 
-(Befehl zur Videoerzeugung: nach der tatsächlichen Umsetzung eintragen.)
+## Agentische Entwicklung
 
-(Commit, auf dessen Stand die Videos erzeugt wurden: nach der tatsächlichen Umsetzung eintragen.)
+Drei repräsentative Schleifen; die vollständige Dokumentation aller sechs steht in [docs/agentic-workflow.md](docs/agentic-workflow.md).
 
-## Verifikationsstand
+**1. Vitalwerteingabe über Zeigerkoordinaten**
+*Ziel:* Werte sollen aus der Grafikposition entstehen, nicht aus Formulareingaben.
+*Aufgabe:* Einen Demoablauf bauen, der jeden Wert per Klick oder Ziehen erzeugt und ihn trotzdem exakt prüft.
+*Ergebnis:* Der Test kalibriert die Y-Achse über zwei Messfahrten, liest die Koordinatenanzeige der Anwendung und behauptet, dass der gespeicherte Wert dem angezeigten entspricht.
+*Menschliches Review:* Rückmeldung, dass Zahlen nicht eingetippt werden dürfen und der Zeiger sichtbar sein muss.
+*Verworfen:* Das Setzen der Werte über `fill()` in die Formularfelder – es hätte eine Bedienung gezeigt, die es so nicht gibt.
 
-Die folgenden Prüfungen müssen unmittelbar vor der Abgabe auf dem finalen Git-Commit erneut ausgeführt werden:
+**2. iPad-Interaktionen und ein instabiler Ablauf**
+*Ziel:* Die Standard-Suite soll vollständig und reproduzierbar grün sein.
+*Aufgabe:* Den nur im Gesamtlauf fehlschlagenden Test `iPad R5 Story 10` stabilisieren, ohne die Aussage zu verändern.
+*Ergebnis:* Die Höhe des ersten Dropdown-Eintrags wird nach einer Sichtbarkeits- und Bedienbarkeitsprüfung zustandsbasiert über `expect.poll` gemessen; 166/166 Tests bestehen.
+*Menschliches Review:* Ausdrückliche Forderung nach einer echten Korrektur statt eines Vermerks „bekannt flakig“.
+*Verworfen:* Überspringen, Absenken des 24-px-Grenzwerts, feste Wartezeiten und höhere Retries – alle hätten das Symptom verdeckt.
 
-| Prüfung | Befehl | Ergebnis |
-|---|---|---|
-| Lint | `npm run lint` | (noch nach dem letzten Commit auszuführen) |
-| Unit- und Integrationstests | `npm run test` | (noch nach dem letzten Commit auszuführen) |
-| Production-Build | `npm run build` | (noch nach dem letzten Commit auszuführen) |
-| Playwright Desktop | projektspezifischer Playwright-Aufruf | (noch nach dem letzten Commit auszuführen) |
-| Playwright iPad-nah | projektspezifischer Playwright-Aufruf | (noch nach dem letzten Commit auszuführen) |
-| Playwright-Demo-Video | (Befehl nach Umsetzung eintragen) | (noch nicht erstellt) |
+**3. Leerer Fall**
+*Ziel:* Ein Fall ohne jeden Eintrag soll den nächsten Schritt benennen.
+*Aufgabe:* Einen knappen Hinweis ergänzen, der mit dem ersten Eintrag verschwindet und nach einem Reload nicht zurückkehrt.
+*Ergebnis:* Hinweis unterhalb der Grafik, abgeleitet aus dem Fall-Store, in beiden Playwright-Projekten geprüft.
+*Menschliches Review:* Vorgabe, die Zeitachse sichtbar zu lassen und kein Onboarding einzubauen.
+*Verworfen:* Die Platzierung oberhalb der Grafik – ihr Erscheinen hätte die Bänder vertikal verschoben.
 
-Ergebnisse werden erst dann als erfolgreich dokumentiert, wenn der jeweilige Befehl tatsächlich auf dem finalen Commit ausgeführt wurde. Veraltete Testzahlen oder Ergebnisse früherer Commits gelten nicht als aktueller Nachweis.
+## Manuelle iPad-Prüfung
 
+Die folgenden Abläufe wurden von der Auftraggeberin manuell auf einem physischen iPad geprüft:
 
-## Architekturüberblick
+- Vitalwerte hinzufügen und verschieben
+- systolischen und diastolischen NIBP-Wert ziehen
+- Medikamente hinzufügen
+- Infusionen hinzufügen
+- Drawer-Verhalten ohne unerwünschtes Seitenscrollen
+- Scrollverhalten bei Finger- und Pencil-Interaktionen
+- Ereignisse hinzufügen und korrigieren
+- Persistence nach einem Reload
+- Export- beziehungsweise Files-Ablauf
 
-Die Anwendung ist eine clientseitige Next.js-Anwendung auf Basis von React und TypeScript. Ant Design wird für Formulare, Schaltflächen, Dialoge, Drawer und weitere standardisierte Bedienelemente verwendet. Die interaktive Zeitachse ist dagegen eine eigene SVG-basierte Benutzeroberfläche.
+Gerätemodell, iPadOS- und Browserversion sowie das Apple-Pencil-Modell sind nicht dokumentiert; über eine bestimmte Browser-Engine wird daher keine Aussage getroffen. Die restlichen Zeilen der Prüfliste stehen in [docs/ipad-acceptance-test.md](docs/ipad-acceptance-test.md).
 
-Der Hauptablauf ist auf drei Bereiche verteilt:
+## Bewusst nicht umgesetzt und bekannte Grenzen
 
-- `/` erfasst und validiert die Basisdaten des Narkosefalls.
-- `/dokumentation` enthält die gemeinsame Zeitachse für Vitalwerte, Therapien, Phasen und Ereignisse.
-- `/abschluss` zeigt nach dem Fallende eine schreibgeschützte Kontrolle, die Vollständigkeitsprüfung und den Dateiexport.
+Nicht Teil der Demo sind Backend und Datenbank, Anmeldung und Mehrbenutzerbetrieb, Gerätesynchronisation, Anbindung an Patientenmonitore, eine Arzneimitteldatenbank, Abrechnung oder KIS-Anbindung, automatische Diagnose-, Behandlungs- und Dosierungsempfehlungen, medizinische Plausibilitätsentscheidungen, ein zertifizierter Medizinprodukt-Workflow sowie ein eigener Workflow für mehrtägige Eingriffe.
 
-Die Falldaten werden vollständig im Browser verwaltet. Nach abgeschlossenen Änderungen werden sie in `localStorage` geschrieben und beim erneuten Laden wiederhergestellt. Ein Backend, Benutzerkonto oder eine geräteübergreifende Synchronisation existiert nicht.
+Bekannte Grenzen:
 
-Die gemeinsame SVG-Zeitachse bildet Medikamente, Infusionen, Ereignisse und vier Vitalparameter auf derselben Zeitkoordinate ab. Die fachliche Logik für Koordinaten, Skalen, Warnungen, Vollständigkeitsprüfung und Persistence ist von der reinen Darstellung getrennt und wird durch Unit- und Browser-Tests geprüft.
+- Keine Synchronisation; Daten bleiben an Browser, Gerät und Origin gebunden.
+- Offline-Betrieb erst nach einem Produktionsaufruf mit aktivem Service Worker.
+- Das iPad-Playwright-Projekt nutzt Chromium; WebKit lässt sich auf dem verwendeten Windows-Host nicht starten.
+- Der Files-/Freigabe-Ablauf auf iPadOS hängt vom Betriebssystem und der gewählten Aktion ab.
+- Screenreader-, vollständige Kontrast- und die restliche iPad-Prüfliste sind offen.
+- Zeitfelder beziehen sich auf den lokalen Kalendertag des Falls.
+- Automatisierte Prüfungen ersetzen keine medizinische Bewertung.
 
-Für automatisierte Tests werden Vitest und Playwright verwendet. Playwright prüft den Hauptablauf in einem Desktop-Viewport und einem iPad-nahen Touch-Viewport.
-
-
-## Bedienung
-
-1. Auf `/` werden die Basisdaten eingegeben oder der eindeutig markierte fiktive Demofall geladen.
-2. `Okay und Weiter` öffnet `/dokumentation`.
-3. `Start` setzt die unveränderliche Startzeit des Falls.
-4. Werte werden direkt in den vier Vitalbändern dokumentiert. Medikamente, Infusionen und Flüssigkeiten werden durch Auswahl eines Zeitpunkts in ihrer jeweiligen Lane angelegt.
-5. Ereignissymbole werden in `Phasen und Ereignisse` gewählt und anschließend auf derselben Zeitachse platziert. Ein erneuter Klick auf das aktive Symbol oder `Escape` beendet die Auswahl; nach einer Platzierung bleibt das Werkzeug für weitere gleichartige Ereignisse aktiv.
-6. `Eingriff beenden` speichert `endedAt`. Danach führt `Speichern und Schließen` zur schreibgeschützten Kontrolle und zum Dateiexport.
-
-Die sechs Ereignistypen sind `Beginn Anästhesie`, `Schnitt`, `Naht`, `Ende Ausleitung`, `Patient aus dem Saal` und `Extra`. Derselbe Typ kann mehrfach platziert werden. `Extra` besitzt zusätzlich einen frei bearbeitbaren Kommentar und kann wie andere Ereignisse verschoben, bearbeitet und gelöscht werden.
-
-## Vital-Timeline
-
-Alle Therapie-Lanes und Vitalbänder liegen in einem gemeinsamen SVG und verwenden dieselbe Zeitkoordinate. SpO₂ wird als Step-Linie dargestellt, Herzfrequenz und Temperatur als Linienverlauf. NIBP besteht aus Mittelwertpunkt sowie getrennt editierbaren systolischen und diastolischen Griffen; `mmHg` wird als feste Einheit gezeigt und nicht an jedem Wert wiederholt.
-
-Jedes Vitalband berechnet seine Y-Skala aus den im sichtbaren Zeitbereich vorhandenen Werten. NIBP berücksichtigt Systole, Mittelwert und Diastole gemeinsam. Endliche negative, kleine oder große Zahlen werden nicht durch medizinische Hardlimits abgeschnitten. Ein visueller Rand verhindert, dass Einzel- oder Extremwerte am Bandrand kleben.
-
-Die relativen Fünf-Minuten-Kontrollpunkte beginnen bei `startedAt + 5 Minuten`. Fehlt an einem abgeschlossenen Kontrollpunkt mindestens eines der vier Vitalbänder oder ist ein NIBP-Datensatz unvollständig, erscheinen eine rote Linie und ein zugänglicher Warnbutton. Diese Hinweise sind abgeleiteter UI-Zustand und werden nicht persistiert.
-
-## Desktop- und iPad-Unterstützung
-
-Das Layout vermeidet horizontalen Seiten-Overflow und ist für Desktop 1280×800 sowie den automatisierten iPad-nahen Viewport 810×1080 geprüft. Der iPad-Viewport-Test läuft auf diesem Windows-System mit Chromium. Er ist **kein** Ersatz für Safari, iPadOS oder ein physisches Gerät.
-
-Die noch ausstehende reale Hardwareabnahme ist in [docs/ipad-acceptance-test.md](docs/ipad-acceptance-test.md) vorbereitet.
-
-## Pointer-, Touch- und Pen-Unterstützung
-
-Die Anwendung verwendet bereits Pointer Events für Maus, Finger und Stift: `pointerdown`, `pointermove`, `pointerup`, `pointercancel` und bei Drag-Interaktionen Pointer Capture. Kurze Gesten werden als Tap, größere Bewegungen als Drag oder vertikales Scrollen ausgewertet. Ereigniswerkzeuge sowie kleine Warn- und Ereignismarker besitzen mindestens 44×44 CSS-Pixel große Interaktionsflächen; sichtbare Symbole dürfen kleiner bleiben. Tastaturziele unterstützen Fokus, Enter und Space, Toggle-Werkzeuge zusätzlich `aria-pressed` und `Escape`.
-
-Ein echter Apple Pencil kann in dieser Umgebung nicht automatisiert geprüft werden. Der `pen`-Pfad ist durch Unit- und Browser-Events abgedeckt, die physische Prüfung bleibt dennoch erforderlich.
-
-## Datenmodell
-
-Ein Narkosefall besteht aus folgenden zentralen Bereichen:
-
-### Basisdaten
-
-Die Basisdaten enthalten die zur Demo gehörenden Angaben, unter anderem:
-
-- Patient/-in,
-- Geburtsdatum,
-- Eingriff,
-- OP-Datum,
-- Körpergewicht und Einheit,
-- ASA-Klasse,
-- Mallampati-Klasse,
-- Allergien.
-
-Es dürfen ausschließlich fiktive Angaben verwendet werden.
-
-### Fallstatus
-
-Der Fall enthält eine eindeutige Fall-ID sowie zeitliche und technische Statusinformationen:
-
-- Startzeit `startedAt`,
-- optionale Endzeit `endedAt`,
-- Schema-Version,
-- Fallrevision,
-- Exportrevision,
-- Archivierungs- und Abschlussstatus.
-
-### Vitalmessungen
-
-SpO₂, Herzfrequenz und Temperatur werden als einzelne Messwerte mit Zeitpunkt und Wert gespeichert.
-
-Eine NIBP-Messung enthält drei Werte am selben Zeitpunkt:
-
-- systolisch,
-- mittlerer arterieller Druck,
-- diastolisch.
-
-Die drei NIBP-Werte gehören fachlich und technisch zu einem gemeinsamen Messdatensatz.
-
-### Therapien
-
-Medikamente, Infusionen und Flüssigkeiten enthalten abhängig von der Anwendungsart:
-
-- Bezeichnung,
-- Beginn,
-- Dosis oder Menge,
-- strukturierte Einheit,
-- Anwendungsart,
-- optionales Ende,
-- Status einer noch laufenden kontinuierlichen Gabe.
-
-Ein Bolus besitzt einen einzelnen Zeitpunkt. Eine kontinuierliche Gabe oder Infusion besitzt einen Beginn und entweder ein Ende oder den Status `ongoing`.
-
-### Phasen und Ereignisse
-
-Ein Ereignis enthält:
-
-- einen eindeutigen Eintrag,
-- einen Ereignistyp,
-- einen Zeitpunkt,
-- bei Extra-Ereignissen optional einen frei bearbeitbaren Kommentar.
-
-Unterstützte Typen sind Beginn Anästhesie, Schnitt, Naht, Ende Ausleitung, Patient aus dem Saal und Extra.
-
-### Abgeleitete Zustände
-
-Kritische Warnungen, Fünf-Minuten-Vollständigkeitshinweise und Ergebnisse der Vollständigkeitsprüfung werden nicht als eigenständige Falldaten gespeichert. Sie werden bei jeder Anzeige erneut aus den vorhandenen Falldaten und der Konfiguration berechnet.
-
-
-## Datenhaltung und Persistence
-
-Basisdaten und Falldokumentation werden sofort nach einer abgeschlossenen Änderung in `localStorage` geschrieben. Die 600-ms-Verzögerung betrifft nur den sichtbaren Wechsel von `Wird gespeichert …` zu `✓ Gespeichert`; sie verzögert nicht das Schreiben. Daten bleiben auf denselben Browser, dasselbe Gerät und dieselbe Origin beschränkt. Es gibt kein Backend und keine Synchronisation.
-
-Die aktuelle Fall-Schema-Version ist **6**. Der Parser akzeptiert Version 1 bis 5 und überführt sie in Version 6:
-
-- Version 1 bewahrt Startzeit und Messungen; damals nicht vorhandene Therapien und Ereignisse werden als leere Listen ergänzt.
-- Version 2 bewahrt vollständige NIBP-Dreierwerte.
-- Version 3 unterstützt vorübergehend offene systolische und diastolische NIBP-Werte.
-- Version 4 erhält sichere Defaults für Fallrevision und Exportrevision.
-- Version 5 erhält vorhandene Ereignisse, ergänzt fehlende Kommentare leer und bewahrt `Extra`-Kommentare.
-- Ältere Therapieeinheiten werden in die aktuelle strukturierte Einheit überführt.
-
-Beschädigtes JSON wird nicht still überschrieben und bringt die Anwendung nicht zum Absturz. Start, Ende, Messungen, Therapien, Ereignisse und Revisionen werden nach Reload wiederhergestellt. Kritische Threshold-Einstellungen liegen getrennt pro Fall und sind ausdrücklich **nicht** Teil des Fall-Exports. Vollständigkeits- und Warnresultate werden nicht gespeichert, sondern bei jeder Anzeige neu aus den Falldaten berechnet.
-
-### Zuordnung von Pointer-Koordinaten
-
-Pointer-Ereignisse liefern zunächst Koordinaten relativ zum Browserfenster. Diese werden in das lokale Koordinatensystem des SVG überführt, damit Scrollposition, responsive Größe und die tatsächliche Position der Zeitachse berücksichtigt werden.
-
-Die horizontale SVG-Koordinate wird anschließend auf den sichtbaren Zeitbereich abgebildet:
-
-- der linke Rand entspricht dem Beginn des sichtbaren Zeitbereichs,
-- der rechte Rand entspricht dessen Ende,
-- Positionen dazwischen werden proportional in einen Zeitpunkt umgerechnet.
-
-Die vertikale Koordinate wird über die jeweils aktive Y-Skala des Vitalbands in einen Messwert zurückgerechnet. Da SpO₂, Herzfrequenz, NIBP und Temperatur unterschiedliche Skalen verwenden, erfolgt diese Umrechnung parameterspezifisch.
-
-Ermittelte Werte werden entsprechend der für den Parameter vorgesehenen Genauigkeit gerundet. Eingaben außerhalb der nutzbaren Zeichenfläche werden auf den zulässigen Darstellungsbereich begrenzt oder verworfen, abhängig von der bestehenden Interaktionslogik.
-
-Bei NIBP verwenden systolischer, mittlerer und diastolischer Wert denselben Zeitpunkt. Die systolischen und diastolischen Griffe können getrennt bearbeitet werden, ohne die zeitliche Zuordnung des gemeinsamen NIBP-Datensatzes aufzulösen.
-
-Die Koordinatenumrechnung wird nicht ausschließlich visuell geprüft. Unit-Tests kontrollieren die Abbildung von X-Koordinaten auf Zeitpunkte und von Y-Koordinaten auf Messwerte für unterschiedliche Positionen und Größen.
-
-## Export
-
-Nach dem Fallende zeigt `/abschluss` zuerst Basisdaten, eine schreibgeschützte echte Timeline-Vorschau und die `Vollständigkeitsprüfung`. Erst danach folgt die Dateiauswahl und die letzte Bestätigung.
-
-- Unterstützt der Browser `window.showDirectoryPicker`, öffnet `Ordner auswählen` den echten Systemdialog und schreibt die JSON-Datei über die File System Access API in den gewählten Ordner.
-- Unterstützt ein Gerät Dateifreigabe über `navigator.canShare({ files })`, wird die reale JSON-Datei über Web Share angeboten, beispielsweise für `In Dateien sichern` auf iPadOS.
-- Andernfalls wird eine reale JSON-Datei als Download bereitgestellt.
-
-Abbruch oder Schreibfehler erzeugen keine Erfolgsmeldung, archivieren den Fall nicht und löschen keine aktiven Daten. Erst ein erfolgreich gestarteter Datei- oder Freigabeweg aktualisiert die Exportrevision, archiviert und schließt den Fall. Der Export enthält Schema-Version, Basisdaten, Fall-ID, Start/Ende, Messungen einschließlich NIBP, Therapien, Ereignisse und Archivierungszeit.
-
-## Fiktiver Demofall
-
-`Fiktiven Demofall laden` erzeugt mit einem Klick einen ausschließlich fiktiven, beendeten Fall im normalen Schema. Er enthält fiktive Basisdaten, mehrere Vitalsets, vollständige NIBP-Dreierwerte, Bolus und kontinuierliche Gabe, eine Infusion, mehrere Ereignisse, einen kommentierten `Extra`-Eintrag, kritische Beispielwerte sowie kontrolliert offene Dokumentationshinweise. Im Kopf bleibt dauerhaft sichtbar:
-
-```text
-FIKTIVER DEMOFALL – Keine realen Patientendaten
-```
-
-Existieren bereits lokale Angaben oder eine aktive Dokumentation, verlangt das Laden vorher eine ausdrückliche Bestätigung. Reload, Export und `Neuen Fall starten` verwenden dieselben produktiven Persistence- und Sicherheitswege wie ein normaler Fall; das Exportschema erhält kein Demo-Sonderfeld.
-
-## Vollständigkeitsprüfung
-
-Die zentrale Prüfung ist eine reine, testbare Auswertung vorhandener Daten. Sie kontrolliert:
-
-- formale Basisdaten nach den vorhandenen Datumsregeln,
-- Start- und Endstatus,
-- abgeleitete offene Fünf-Minuten-Vitalcheckpoint-Hinweise,
-- nicht beendete kontinuierliche Medikamentengaben und Infusionen,
-- tatsächlich unvollständige Therapieeinheiten,
-- optional ausdrücklich konfigurierte Pflicht-Ereignisse.
-
-Standardmäßig ist kein medizinisches Ereignis verpflichtend. Hinweise sind keine klinische Bewertung und keine Empfehlung. Bei offenen Punkten kann zur passenden Seite zurückgekehrt oder nach bewusster Kenntnisnahme mit dem Export fortgefahren werden.
-
-## Kritische Vitalwertwarnungen
-
-Kritische Hinweise werden aus benutzerseitig konfigurierbaren Thresholds und vorhandenen Messungen abgeleitet. Automatische Erwachsenenvorgaben sind eine visuelle Orientierung, keine medizinische Entscheidung. Die Oberfläche zeigt die aus dem Geburtsdatum berechnete Altersnotiz. Das Warnsymbol besitzt einen klaren zugänglichen Namen und eine sichtbare Fokusmarkierung; die Erklärung ist nicht nur durch Farbe codiert. Die Thresholds und abgeleiteten Warnungen werden nicht in den Fall-Export geschrieben.
-
-## Barrierefreiheit
-
-- Ereignis-, Warn- und zentrale Timeline-Ziele besitzen große Hitflächen.
-- Toggle-Zustände verwenden `aria-pressed` und eine zusätzliche sichtbare Markierung.
-- Fokuszustände sind sichtbar; wichtige SVG-Ziele sind per Tastatur erreichbar.
-- Warnungen besitzen Text und zugängliche Namen statt reiner Farbcodierung.
-- `@axe-core/playwright` prüft Basisdaten, Dokumentation und Abschluss auf schwere und kritische WCAG-Verstöße.
-- Extra-Kommentare sind per Hover und Fokus erreichbar.
-
-Axe ersetzt keine Prüfung mit Screenreader, realer Tastatur, Safari, Touch oder Apple Pencil. Diese Punkte bleiben Teil der manuellen Abnahme.
-
-## Priorisierung
-
-Der Schwerpunkt der Umsetzung liegt auf einem vollständigen und sicher korrigierbaren Hauptablauf:
-
-1. Basisdaten eines fiktiven Narkosefalls erfassen.
-2. Dokumentation starten.
-3. Vitalwerte direkt in einer gemeinsamen Zeitachse eintragen.
-4. NIBP als zusammengehörige systolische, mittlere und diastolische Messung dokumentieren.
-5. Medikamente, Infusionen, Flüssigkeiten, Phasen und Ereignisse erfassen.
-6. Bestehende Einträge bearbeiten, verschieben oder entfernen.
-7. Den Fall nach einem Reload ohne Datenverlust weiterbearbeiten.
-8. Den Fall kontrolliert beenden und als JSON-Datei exportieren.
-9. Kritische und unvollständige Dokumentationszustände sichtbar, aber ohne medizinische Entscheidung darstellen.
-
-Zusätzliche Funktionen wurden nur umgesetzt, wenn sie den Hauptablauf nicht destabilisieren. Dazu gehören insbesondere der fiktive Demofall, die Vollständigkeitsprüfung, konfigurierbare kritische Warnungen, Barrierefreiheitsprüfungen und unterschiedliche Dateiexportwege.
-
-## Bewusst nicht umgesetzt
-
-Folgende Funktionen wurden bewusst nicht als Teil dieser Demo umgesetzt:
-
-- Backend und zentrale Datenbank,
-- Anmeldung und Benutzerverwaltung,
-- Mehrbenutzerbetrieb,
-- Synchronisation zwischen Geräten,
-- direkte Anbindung an Patientenmonitore oder andere Medizingeräte,
-- vollständige Arzneimitteldatenbank,
-- Abrechnung oder Krankenhausinformationssystem,
-- automatische Diagnose,
-- Behandlungsempfehlungen,
-- automatische Dosierungsempfehlungen,
-- medizinische Plausibilitätsentscheidung,
-- zertifizierter Medizinprodukt-Workflow,
-- automatisierter Nachweis für reales iPadOS, Mobile Safari oder Apple Pencil,
-- eigenständiger Workflow für mehrtägige Eingriffe.
-
-Diese Einschränkungen entsprechen der bewussten Priorisierung auf einen überzeugenden, lokal funktionierenden Dokumentationsablauf für einen ausschließlich fiktiven Demofall.
-
-## Agentic Development Workflow
-
-Die verifizierbaren Entwicklungs- und Korrekturschleifen sind in [docs/agentic-workflow.md](docs/agentic-workflow.md) dokumentiert. Agentische Unterstützung ersetzt dort ausdrücklich nicht die menschliche Produkt- und Sicherheitsprüfung.
-
-## Bekannte Einschränkungen
-
-- Kein Backend, keine Geräte- oder Benutzersynchronisation und kein Mehrbenutzerbetrieb.
-- Die Offline-Funktion steht erst nach einem erfolgreichen Produktionsaufruf mit Service Worker zur Verfügung.
-- Playwrights iPad-Projekt nutzt Chromium und emuliert weder Mobile Safari noch einen echten Apple Pencil.
-- Die Dateifreigabe auf iPadOS hängt von Safari, iPadOS und der vom Benutzer gewählten Files-/Share-Aktion ab.
-- Physische iPad-, Apple-Pencil-, Screenreader- und vollständige manuelle Kontrastprüfung sind noch offen.
-- Zeitfelder beziehen sich auf den lokalen Kalendertag des Falls; ein mehrtägiger Eingriff über Mitternacht ist nicht als eigener Workflow modelliert.
-- Die Anwendung besitzt keine Arzneimitteldatenbank und führt keine medizinische Plausibilitätsprüfung durch.
+Barrierefreiheit ist über große Trefferflächen, `aria-pressed`, sichtbare Fokuszustände, Tastaturbedienung wichtiger SVG-Ziele und `@axe-core/playwright` abgedeckt.
 
 ## Deployment
 
-Eine öffentliche Bereitstellung wurde für diese Abgabe noch nicht eingerichtet. Die Anwendung kann mit den oben beschriebenen Befehlen lokal gestartet werden. Im Repository wurden weder eine Vercel-Projektverknüpfung noch eine Deployment-URL oder ein Deployment-Workflow gefunden; Vercel CLI war in der geprüften Umgebung nicht verfügbar. Ohne ausdrückliche Freigabe wird kein externes Projekt erstellt und kein Production-Deployment ausgelöst.
+Produktions-URL: **https://sikant.vercel.app**
 
-Der überprüfbare Lieferstatus und die noch manuellen Schritte stehen in [docs/delivery-checklist.md](docs/delivery-checklist.md).
+Die Bereitstellung erfolgt über die Vercel-Git-Integration des Branches `main`. Für den finalen Commit wurde am 05.08.2026 geprüft, dass das zugehörige Production-Deployment den Status `Ready` besitzt, denselben Commit trägt und die URL mit HTTP 200 die Anwendung ausliefert.
+
+## Weiterführende Dokumente
+
+- [docs/agentic-workflow.md](docs/agentic-workflow.md) – alle sechs Entwicklungs- und Korrekturschleifen
+- [docs/delivery-checklist.md](docs/delivery-checklist.md) – Lieferstatus, Verifikation und offene Punkte
+- [docs/ipad-acceptance-test.md](docs/ipad-acceptance-test.md) – Prüfliste für die manuelle iPad-Abnahme

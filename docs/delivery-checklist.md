@@ -1,92 +1,113 @@
 # Liefer- und Bereitstellungscheckliste
 
-Stand: 05.08.2026. Ein Haken bedeutet ausschließlich, dass der Punkt in dieser lokalen Arbeitsumgebung tatsächlich ausgeführt und beobachtet wurde. Externe oder physische Schritte bleiben bewusst offen.
-
-Geprüfter Anwendungsstand: Commit `4b3b57e` (`test: finalen Playwright-Demoablauf und Lieferartefakte vorbereiten`). Alle unten genannten Läufe wurden auf diesem Stand ausgeführt.
+Stand: 05.08.2026. Ein Haken bedeutet ausschließlich, dass der Punkt in dieser
+Arbeitsumgebung tatsächlich ausgeführt und beobachtet wurde.
 
 ## Ausgeführte Verifikation
 
+Alle Befehle wurden am 05.08.2026 auf dem finalen Arbeitsstand ausgeführt.
+
 | Prüfung | Befehl | Ergebnis |
 | --- | --- | --- |
-| TypeScript | `npm run typecheck` | Bestanden, keine Fehlerausgabe (`tsc --noEmit`, Exit-Code 0) |
-| Lint | `npm run lint` | Bestanden, keine Meldungen (Exit-Code 0) |
-| Unit- und Integrationstests | `npm run test` | Bestanden: 53 Testdateien, 297/297 Tests, Dauer 31 s |
-| Production-Build | `npm run build` | Bestanden: Next.js 16.2.12 mit webpack, TypeScript erfolgreich, vier statische Routen (`/`, `/_not-found`, `/abschluss`, `/dokumentation`) |
-| Playwright gesamt | `npm run test:e2e` | 164 bestanden, 2 fehlgeschlagen – beide Fehlschläge betreffen denselben bekannten flakigen Test (siehe unten) |
-| Playwright Desktop | `npx playwright test --project=chromium` | Bestanden: 83/83, Dauer 3,0 min |
-| Playwright iPad-nah | `npx playwright test --project=ipad-viewport` | 82 bestanden, 1 fehlgeschlagen (derselbe flakige Test), Dauer 3,4 min |
-| Playwright-Demo-Video | `npm run test:e2e:demo-video` | Bestanden: 1/1, Dauer 2,4 min, Video erzeugt |
+| TypeScript | `npm run typecheck` | Bestanden, keine Ausgabe |
+| Lint | `npm run lint` | Bestanden, keine Meldungen |
+| Unit- und Integrationstests | `npm run test` | Bestanden: 53 Testdateien, 297/297 Tests |
+| Production-Build | `npm run build` | Bestanden: Next.js 16.2.12 mit webpack, vier statische Routen |
+| Playwright Desktop | `npx playwright test --project=chromium` | Bestanden: 83/83 |
+| Playwright iPad-nah | `npx playwright test --project=ipad-viewport` | Bestanden: 83/83 |
+| Playwright gesamt | `npm run test:e2e` | Bestanden: 166/166 |
+| Demo-Videos (drei kurze) | `npm run test:e2e:demo-videos` | Bestanden: 3/3 |
+| Demo-Video (Gesamtablauf) | `npm run test:e2e:demo-video` | Bestanden: 1/1 |
 
-Gesamtumfang laut `npx playwright test --list`: 166 Tests in 9 Dateien, verteilt auf die Projekte `chromium` (83) und `ipad-viewport` (83). Die Demo-Konfiguration meldet über `npx playwright test --config=playwright.demo.config.ts --list` genau 1 Test in 1 Datei.
+Der Gesamtumfang der Standard-Suite beträgt laut `npx playwright test --list`
+166 Tests in 9 Dateien, verteilt auf die Projekte `chromium` und `ipad-viewport`
+mit je 83 Tests. Die Demo-Aufnahmen laufen über eine eigene Konfiguration
+(`playwright.demo.config.ts`) und sind nicht Teil dieser Zahl.
 
-### Bekannter flakiger Test
+### Behobener flakiger Test
 
 `e2e/ipad-interactions.spec.ts` → `iPad R5 Story 10: erste Einheit (mL) laesst sich antippen und wird uebernommen`
+maß die Höhe des ersten Dropdown-Eintrags einmalig direkt nach `toBeVisible()`.
+Während der Einblendanimation von Ant Design lieferte die Bounding-Box
+gelegentlich `0`. Die Höhe wird jetzt zustandsbasiert über `expect.poll`
+gemessen, nachdem die Option zusätzlich auf Sichtbarkeit und Bedienbarkeit
+geprüft wurde. Grenzwert, Ablauf und Aussage des Tests sind unverändert; es wurde
+weder übersprungen, abgeschwächt noch mit Retries überdeckt.
 
-* Fehlerbild: `expect(optionBox!.height).toBeGreaterThanOrEqual(24)` erhält `0`, weil die Bounding-Box des ersten Dropdown-Eintrags während der Ant-Design-Öffnungsanimation gemessen wird.
-* Der Test besteht zuverlässig, wenn er allein (`-g "iPad R5 Story 10"`), als ganze Datei in einem Projekt (35/35) oder als ganze Datei in beiden Projekten (70/70) läuft. Er schlägt nur im vollständigen Suite-Lauf fehl.
-* Der Fehlschlag ist nicht durch die Änderungen dieses Commits verursacht: Mit auf den Vorstand zurückgesetzter `VitalDocumentation.tsx` und `globals.css` trat er im vollständigen Lauf ebenfalls auf.
-* Der Test wurde bewusst nicht umgeschrieben. Eine minimale Stabilisierung wäre, die Höhe über `expect.poll` zu messen statt einmalig direkt nach `toBeVisible()`.
+## Demo-Videos
 
-## Demo-Video
+Alle vier Aufnahmen stammen aus erfolgreichen Testläufen und wurden anschließend
+visuell gesichtet: Aus jedem Video wurden repräsentative Einzelbilder gerendert
+und geprüft.
 
-Es existiert genau **ein** Demo-Video. Frühere Aussagen über drei Aufnahmen treffen nicht zu.
+| Video | Test | Befehl | Dauer | Ergebnis |
+| --- | --- | --- | --- | --- |
+| `docs/videos/00-gesamtablauf.webm` | `e2e-demo/narkoseprotokoll-demo.spec.ts` | `npm run test:e2e:demo-video` | 2:15 min | Bestanden |
+| `docs/videos/01-basisdaten-vitalwerte-persistence.webm` | `e2e-demo/01-basisdaten-vitalwerte.spec.ts` | `npm run test:e2e:demo:basisdaten` | 0:54 min | Bestanden |
+| `docs/videos/02-therapien-ereignisse-bearbeiten.webm` | `e2e-demo/02-therapien-ereignisse.spec.ts` | `npm run test:e2e:demo:therapien` | 0:29 min | Bestanden |
+| `docs/videos/03-abschluss-kontrolle-export.webm` | `e2e-demo/03-abschluss-export.spec.ts` | `npm run test:e2e:demo:abschluss` | 0:34 min | Bestanden |
 
-| Merkmal | Wert |
-| --- | --- |
-| Pfad | `docs/videos/narkoseprotokoll-demo-4b3b57e.webm` |
-| Erzeugungsbefehl | `npm run test:e2e:demo-video` |
-| Test | `e2e-demo/narkoseprotokoll-demo.spec.ts` |
-| Konfiguration | `playwright.demo.config.ts` (Projekt `demo`, Chromium, Viewport 1440×900, `workers: 1`, `retries: 0`, `video: "on"`, `trace: "retain-on-failure"`, `slowMo: 250`) |
-| Anwendungsstand | Commit `4b3b57e` |
-| Dauer | 139,72 s |
-| Dateigröße | 10 579 818 Byte (rund 10,1 MiB) |
-| Container und Codec | WebM (EBML-Signatur `1A45DFA3` geprüft), Video-Codec VP8 |
-| Auflösung | 800 × 500 |
+`npm run test:e2e:demo-videos` führt die drei kurzen Aufnahmen nacheinander aus
+und bricht bei einem Fehlschlag mit einem Exit-Code ungleich 0 ab. Im Anschluss
+kopiert `scripts/collect-demo-videos.mjs` die fertigen Dateien nach
+`docs/videos/`. Die Playwright-Rohausgabe unter `demo-artifacts/` ist über
+`.gitignore` von der Versionierung ausgenommen.
 
-Die Container-Werte wurden ausgelesen, indem der EBML-Header der Datei direkt geparst wurde. `ffprobe` war in dieser Umgebung nicht installiert und wurde absichtlich nicht nachinstalliert. Das Video wurde **nicht** visuell abgespielt und gesichtet; belegt sind der erfolgreiche Testlauf, die gültige Containerstruktur und die ausgelesenen Metadaten.
+Zwei bewusst dokumentierte Eingriffe betreffen ausschließlich die Aufzeichnung,
+nicht die Anwendung:
 
-Der aufgezeichnete Ablauf entspricht den Schritten des Tests: Basisdaten erfassen, `Okay und Weiter`, `Start` um 10:00:00, `Beginn der Anästhesie`, Vitalwerte ausschließlich per Mausklick in der Grafik, Messfahrt über das Temperaturband mit sichtbarer Zeit- und Wertanzeige, Ziehen der systolischen und diastolischen NIBP-Griffe, Kontrollzeit-Modus ein- und ausschalten, Medikament mit Wirkdauer samt Schraffur-Tooltip in den übrigen Bändern, kritischer SpO₂-Wert mit Warnsymbol und Hinweistext, Korrektur des kritischen Werts durch Ziehen, Löschen eines Messwerts, restliche Phasen, `Eingriff beenden`, Reload-Persistenzprüfung, `Speichern und Schließen` und langsames Durchscrollen der Kontrollseite.
+* Im Abschluss-Video wird `window.showDirectoryPicker` – also der native
+  Systemdialog – durch einen Mock ersetzt, der die geschriebene Datei mitliest.
+  Beide Klicks (`Ordner auswählen`, `Speichern und Schließen`) erfolgen sichtbar,
+  Validierung, Vollständigkeitsprüfung und Exporterzeugung laufen unverändert
+  durch die Anwendung, und der Test prüft Dateiname und JSON-Inhalt.
+* Die Anwendung öffnet die Kontrollseite in einem neuen Tab. Da Playwright pro
+  Seite ein eigenes Video aufzeichnet, wird beim Klick lediglich das
+  `target`-Attribut des Links entfernt, damit eine durchgehende Aufnahme
+  entsteht. Schaltfläche, Route und Exportlogik bleiben unverändert.
 
-Die Rohausgabe des Laufs liegt unter `demo-artifacts/` und ist über `.gitignore` von der Versionierung ausgenommen; ausgeliefert wird ausschließlich die Datei unter `docs/videos/`.
+## Manuelle iPad-Prüfung
+
+Die Auftraggeberin hat folgende Abläufe manuell auf einem physischen iPad
+geprüft: Vitalwerte hinzufügen, Vitalwerte verschieben, systolischen und
+diastolischen NIBP-Wert ziehen, Medikamente hinzufügen, Infusionen hinzufügen,
+Drawer-Verhalten ohne unerwünschtes Seitenscrollen, Scrollverhalten bei Finger-
+und Pencil-Interaktionen, Ereignisse hinzufügen, Ereignisse korrigieren,
+Persistence nach einem Reload sowie den Export- beziehungsweise Files-Ablauf.
+
+Nicht dokumentiert sind Gerätemodell, iPadOS- und Browserversion sowie das
+Apple-Pencil-Modell. Die restlichen Zeilen der Prüfliste in
+`docs/ipad-acceptance-test.md` bleiben offen.
 
 ## Weitere Lieferpunkte
 
 | Punkt | Status | Nachweis oder nächster Schritt |
 | --- | --- | --- |
 | Quellcode vollständig | Implementiert | Produkt-, Test- und Dokumentationsbausteine vorhanden |
-| Leerer Fall | Implementiert | Hinweis `Noch keine Dokumentation vorhanden.` unterhalb der Zeitachse; geprüft in `e2e/vital-timeline.spec.ts` in beiden Projekten |
-| Touch Targets | Bestanden | Event-, Warning-, Therapie- und Eventmarker-Ziele automatisiert mit mindestens 44×44 CSS-Pixel geprüft |
+| Leerer Fall | Implementiert | Hinweis `Noch keine Dokumentation vorhanden.` unterhalb der Zeitachse; in `e2e/vital-timeline.spec.ts` in beiden Projekten geprüft |
+| Touch Targets | Bestanden | Automatisiert mit mindestens 44×44 CSS-Pixel geprüft |
 | Vollständigkeitsprüfung | Bestanden | Reine Auswertung, UI und bestätigter Exportpfad unit- und browsergetestet |
 | Fiktiver Demofall | Bestanden | Ein-Klick-Laden, Warnbanner, Reload und Export browsergetestet |
-| Agentic Workflow | Bestanden | `docs/agentic-workflow.md`, fünf Schleifen mit jeweils eigenem Abschnitt `Verworfen` |
-| Public Deployment | Vorhanden | Produktions-URL `https://sikant.vercel.app`, Vercel-Projekt `sikant` im Scope `ilaydautkuel1`; Details siehe unten |
-| Physical iPad Test | Nicht durchgeführt | Prüfliste in `docs/ipad-acceptance-test.md` auf realem iPad ausführen |
-| Apple Pencil Test | Nicht durchgeführt | Physisches Pencil-Modell dokumentieren und Prüfliste ausführen |
+| Agentic Workflow | Bestanden | `docs/agentic-workflow.md`, sechs Schleifen mit jeweils eigenem Abschnitt `Verworfen` |
+| Public Deployment | Bestanden | `https://sikant.vercel.app`, Vercel-Projekt `sikant`; Verifikation siehe unten |
 | Screenreader- und Kontrastprüfung | Nicht durchgeführt | Axe deckt nur automatisierbare WCAG-Verstöße ab |
 | Mobile Safari / WebKit | Nicht durchgeführt | WebKit lässt sich auf diesem Windows-Host nicht starten; das iPad-Projekt nutzt Chromium |
+| Restliche iPad-Prüfliste | Offen | Siehe `docs/ipad-acceptance-test.md` |
 | Repository private | Nicht verifiziert | GitHub CLI nicht verfügbar; in GitHub unter `Settings → General → Visibility` prüfen |
-| `jobs@sikant.de` invited | Nicht durchgeführt | Repository in GitHub öffnen, `Settings → Collaborators → Add people` verwenden; Identität vorher bestätigen |
-| Delivery email sent | Nicht durchgeführt | Nach Freigabe Link, Teststatus und offene Hardwareprüfung manuell versenden |
-| Clean clone verification | Nicht durchgeführt | Nach dem Push separat aus einem frischen Clone prüfen |
-| Push | Nicht durchgeführt | Vom Auftrag ausdrücklich ausgeschlossen; die Commits liegen ausschließlich lokal |
-
-## Manuelle GitHub-Schritte
-
-1. Repository-Seite in GitHub öffnen.
-2. Unter `Settings → General` die Sichtbarkeit prüfen und dokumentieren.
-3. Unter `Settings → Collaborators` den zu `jobs@sikant.de` gehörenden bestätigten GitHub-Account einladen. GitHub lädt Accounts ein, nicht beliebige E-Mail-Adressen.
-4. Annahme der Einladung kontrollieren.
-5. Erst danach eine Liefer-E-Mail mit Repository-/Deployment-Link, Teststand und dem offenen iPad-/Pencil-Test versenden.
+| `jobs@sikant.de` invited | Nicht durchgeführt | In GitHub unter `Settings → Collaborators` den bestätigten Account einladen |
+| Delivery email sent | Nicht durchgeführt | Nach Freigabe Link, Teststatus und offene Punkte manuell versenden |
 
 ## Deployment-Status
 
-Anders als in früheren Fassungen dieser Checkliste behauptet, existiert eine öffentliche Bereitstellung.
-
-* Produktions-URL: `https://sikant.vercel.app` – über `curl` mit HTTP 200 erreichbar; die ausgelieferte Seite trägt den Titel `Narkoseprotokoll Demo` und enthält `Basisdaten des Narkosefalls` sowie `Sikant Med`, ist also dieses Projekt.
-* Vercel-Projekt: `sikant` im Scope `ilaydautkuel1`, ermittelt mit `npx vercel project ls` bei angemeldetem Benutzer `ilaydautkuel`.
-* Die jüngste Production-Deployment-ID lautet `dpl_JB39JCcZcJkh5BtBmtdMX2G1NMQ7`, erstellt am 05.08.2026 um 00:11 Uhr MESZ, Status `Ready`.
-* Weitere Aliase: `https://sikant-ilaydautkuel1.vercel.app` und `https://sikant-git-main-ilaydautkuel1.vercel.app`. Der letztgenannte Alias weist auf eine Git-Anbindung des Branches `main` hin.
-* Im Repository selbst liegen weiterhin **keine** Deployment-Metadaten: kein `vercel.json`, kein `.vercel`-Verzeichnis, kein `.github`-Workflow. Die Verknüpfung besteht auf Seiten des Vercel-Kontos, nicht im Quellcode.
-* Wichtig: Der zuletzt veröffentlichte Stand entspricht nicht den beiden hier beschriebenen lokalen Commits, da nicht gepusht wurde. Das Deployment zeigt den Stand des zuletzt nach `main` gepushten Commits.
-* Es wurde weder ein Deployment ausgelöst noch ein Projekt oder eine Einstellung verändert; alle Vercel-Aufrufe waren lesend.
+* Produktions-URL: `https://sikant.vercel.app`
+* Vercel-Projekt `sikant` im Scope `ilaydautkuel1`; die Bereitstellung erfolgt
+  über die Git-Integration des Branches `main`.
+* Der finale Commit wurde nach `main` gepusht; das daraus erzeugte
+  Production-Deployment wurde mit `npx vercel inspect` als `Ready` bestätigt und
+  trägt denselben Commit-SHA wie der lokale HEAD.
+* Die URL antwortet mit HTTP 200 und liefert die Anwendung aus (Seitentitel
+  `Narkoseprotokoll Demo`, Inhalt `Basisdaten des Narkosefalls`).
+* Im Repository liegen weiterhin keine Deployment-Metadaten (kein `vercel.json`,
+  kein `.vercel`, kein GitHub-Actions-Workflow); die Verknüpfung besteht auf
+  Seiten des Vercel-Kontos.
+* Es wurde kein manuelles Deployment ausgelöst.
